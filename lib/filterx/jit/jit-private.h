@@ -48,6 +48,7 @@ struct _FilterXJIT
   LLVMTargetMachineRef tm;
 
   FilterXIRValue current_ir_block;
+  FilterXIRValue current_eval_context_param;
   LLVMMetadataRef current_debug_info_block;
 
   FilterXJITFFI ffi;
