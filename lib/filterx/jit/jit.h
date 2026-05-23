@@ -43,6 +43,7 @@ typedef enum
 {
   FILTERX_JIT_DEBUG_INFO_FILTERX = 0,
   FILTERX_JIT_DEBUG_INFO_LLVM_IR,
+  FXNODEBUG
 } FilterXJITDebugInfo;
 
 typedef struct _FilterXJIT FilterXJIT;

@@ -400,6 +400,8 @@ _link_libfilterx(FilterXJIT *self, GError **error)
   if (!self->libfilterx)
     return TRUE;
 
+  LLVMStripModuleDebugInfo(self->libfilterx);
+
   LLVMBool link_err = LLVMLinkModules2(self->mod, self->libfilterx);
   /* libfilterx is consumed */
   self->libfilterx = NULL;
@@ -592,7 +594,7 @@ filterx_jit_new(const gchar *module_name, FilterXJITDebugInfo debug_info, GError
 
   // TODO: use Itanium name mangling and namespaces
   self->mod_name = g_strdup(module_name);
-  self->debug_info_mode = debug_info;
+  self->debug_info_mode = FXNODEBUG;
   self->debug_ir_text_memfd = -1;
 
 #if SYSLOG_NG_HAVE_DECL_LLVMORCCREATENEWTHREADSAFECONTEXTFROMLLVMCONTEXT
