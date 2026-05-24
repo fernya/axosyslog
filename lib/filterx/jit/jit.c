@@ -527,6 +527,12 @@ _create_target_machine(FilterXJIT *self, GError **error)
   const char *triple = LLVMGetTarget(self->libfilterx);
   char *cpu = LLVMGetHostCPUName();
   char *features = LLVMGetHostCPUFeatures();
+  printf("------------%s", features);
+  const gchar *features_override = g_getenv("SYSLOG_NG_FILTERX_JIT_CPU_FEATURES");
+  char *ff = g_strconcat(features, features_override ? "," : "", features_override, NULL);
+  printf("------------%s", ff);
+
+
 
   LLVMTargetRef target = NULL;
   char *err_msg = NULL;
@@ -539,11 +545,12 @@ _create_target_machine(FilterXJIT *self, GError **error)
       return NULL;
     }
 
-  LLVMTargetMachineRef tm = LLVMCreateTargetMachine(target, triple, cpu, features, LLVMCodeGenLevelAggressive,
+  LLVMTargetMachineRef tm = LLVMCreateTargetMachine(target, triple, cpu, ff, LLVMCodeGenLevelAggressive,
                                                     LLVMRelocDefault, LLVMCodeModelJITDefault);
 
   LLVMDisposeMessage(cpu);
   LLVMDisposeMessage(features);
+  g_free(ff);
 
   return tm;
 }
