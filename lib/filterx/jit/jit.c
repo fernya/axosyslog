@@ -96,6 +96,14 @@ _optimize_module(gpointer s, LLVMModuleRef mod)
   msg_trace("FilterXJIT optimize module", evt_tag_str("module_name", self->mod_name));
 
   const gchar *pass_override = g_getenv("SYSLOG_NG_FILTERX_JIT_PASSES");
+
+  LLVMTargetMachineRef tm = tm;
+  const gchar *asd = g_getenv("SYSLOG_NG_FILTERX_JIT_NOTMC");
+  if (asd) {
+    printf("----------------- notmc\n");
+    tm = NULL;
+  }
+
   LLVMErrorRef err = LLVMRunPasses(mod, pass_override ? : "default<O3>", self->tm, options);
 
   LLVMDisposePassBuilderOptions(options);
@@ -583,14 +591,21 @@ _create_target_machine(FilterXJIT *self, GError **error)
 static gboolean
 _setup_target_machine(FilterXJIT *self, LLVMOrcLLJITBuilderRef jit_builder, GError **error)
 {
-  LLVMTargetMachineRef tm = _create_target_machine(self, error);
-  if (!tm)
-    return FALSE;
 
-  LLVMOrcJITTargetMachineBuilderRef tmb = LLVMOrcJITTargetMachineBuilderCreateFromTargetMachine(tm);
-  LLVMOrcLLJITBuilderSetJITTargetMachineBuilder(jit_builder, tmb);
-  /* tm is consumed */
-  tm = NULL;
+    const gchar *asd = g_getenv("SYSLOG_NG_FILTERX_JIT_NOTM");
+  if (asd) {
+    printf("----------------- notm\n");
+  }
+  else {
+    LLVMTargetMachineRef tm = _create_target_machine(self, error);
+    if (!tm)
+      return FALSE;
+
+    LLVMOrcJITTargetMachineBuilderRef tmb = LLVMOrcJITTargetMachineBuilderCreateFromTargetMachine(tm);
+    LLVMOrcLLJITBuilderSetJITTargetMachineBuilder(jit_builder, tmb);
+    /* tm is consumed */
+    tm = NULL;
+  }
 
   self->tm = _create_target_machine(self, error);
   return TRUE;
