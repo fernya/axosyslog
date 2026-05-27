@@ -519,6 +519,27 @@ _create_object_layer_with_gdb_listener(void *ctx, LLVMOrcExecutionSessionRef es,
   return object_layer;
 }
 
+static void
+_parse_codegen_env(LLVMCodeGenOptLevel *opt, LLVMRelocMode *reloc, LLVMCodeModel *model)
+{
+  *opt = LLVMCodeGenLevelAggressive;
+  *reloc = LLVMRelocDefault;
+  *model = LLVMCodeModelJITDefault;
+
+  const gchar *env = g_getenv("SYSLOG_NG_FILTERX_JIT_CODEGEN");
+  if (!env)
+    return;
+
+  int o = -1, r = -1, m = -1;
+  if (sscanf(env, "%d %d %d", &o, &r, &m) == 3 ||
+      sscanf(env, "%d,%d,%d", &o, &r, &m) == 3)
+    {
+      *opt = (LLVMCodeGenOptLevel) o;
+      *reloc = (LLVMRelocMode) r;
+      *model = (LLVMCodeModel) m;
+    }
+}
+
 static LLVMTargetMachineRef
 _create_target_machine(FilterXJIT *self, GError **error)
 {
@@ -543,8 +564,14 @@ _create_target_machine(FilterXJIT *self, GError **error)
       return NULL;
     }
 
-  LLVMTargetMachineRef tm = LLVMCreateTargetMachine(target, triple, cpu, ff, LLVMCodeGenLevelAggressive,
-                                                    LLVMRelocDefault, LLVMCodeModelJITDefault);
+  LLVMCodeGenOptLevel cg_opt;
+  LLVMRelocMode cg_reloc;
+  LLVMCodeModel cg_model;
+  _parse_codegen_env(&cg_opt, &cg_reloc, &cg_model);
+
+  printf("------------ %d %d %d\n", cg_opt, cg_reloc, cg_model);
+
+  LLVMTargetMachineRef tm = LLVMCreateTargetMachine(target, triple, cpu, ff, cg_opt, cg_reloc, cg_model);
 
   LLVMDisposeMessage(cpu);
   LLVMDisposeMessage(features);
