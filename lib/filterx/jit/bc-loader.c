@@ -52,15 +52,43 @@ _mark_symbol_available_externally(LLVMValueRef symbol)
 }
 
 static void
+_add_function_attribute(LLVMContextRef ctx, LLVMValueRef fn, const gchar *attr_str)
+{
+  guint attr_kind = LLVMGetEnumAttributeKindForName(attr_str, strlen(attr_str));
+  LLVMAttributeRef attr = LLVMCreateEnumAttribute(ctx, attr_kind, 0);
+  LLVMAddAttributeAtIndex(fn, LLVMAttributeFunctionIndex, attr);
+}
+
+/* Helpers that the default O3 inliner refuses even at inlinehint-threshold=512, but whose
+ * bodies must reach the JIT call site for devirtualization to pay off. */
+static gboolean
+_should_always_inline(const gchar *name)
+{
+  static const gchar *const allowlist[] =
+  {
+    "filterx_dict_get_anchor_for_key",
+    "filterx_dict_set_subscript_by_anchor",
+  };
+
+  for (gsize i = 0; i < G_N_ELEMENTS(allowlist); i++)
+    {
+      if (g_strcmp0(name, allowlist[i]) == 0)
+        return TRUE;
+    }
+  return FALSE;
+}
+
+static void
 _mark_function_inline(LLVMContextRef ctx, LLVMValueRef fn)
 {
   if (LLVMIsDeclaration(fn))
     return;
 
-  const gchar *inline_str = "inlinehint";
-  guint inline_kind = LLVMGetEnumAttributeKindForName(inline_str, strlen(inline_str));
-  LLVMAttributeRef inline_attr = LLVMCreateEnumAttribute(ctx, inline_kind, 0);
-  LLVMAddAttributeAtIndex(fn, LLVMAttributeFunctionIndex, inline_attr);
+  const gchar *name = LLVMGetValueName(fn);
+  if (_should_always_inline(name))
+    _add_function_attribute(ctx, fn, "alwaysinline");
+  else
+    _add_function_attribute(ctx, fn, "inlinehint");
 }
 
 static void
