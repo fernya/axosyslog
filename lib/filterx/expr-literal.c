@@ -21,6 +21,10 @@
  */
 #include "filterx/expr-literal.h"
 #include "filterx/filterx-eval.h"
+#include "filterx/object-dict.h"
+#include "filterx/object-list.h"
+#include "filterx/object-string.h"
+#include "filterx/object-primitive.h"
 
 typedef struct _FilterXLiteral
 {
@@ -58,6 +62,80 @@ _literal_walk(FilterXExpr *s, FilterXExprWalkFunc f, gpointer user_data)
   return TRUE;
 }
 
+/* Recursively determine the full FilterXStaticTypeSpec for a literal FilterXObject.
+ * Walks dict / list elements to compute element types, bottoming out at STRING / leaf
+ * types or at the depth cap (returns kind-only past the cap). */
+typedef struct
+{
+  FilterXStaticTypeSpec spec;
+  gint depth_remaining;
+} _LiteralElementMeetCtx;
+
+static FilterXStaticTypeSpec _spec_from_filterx_object(FilterXObject *obj, gint depth_remaining);
+
+static gboolean
+_collect_value_spec(FilterXObject *key, FilterXObject *value, gpointer user_data)
+{
+  _LiteralElementMeetCtx *ctx = (_LiteralElementMeetCtx *) user_data;
+  FilterXStaticTypeSpec value_spec = _spec_from_filterx_object(value, ctx->depth_remaining);
+  /* Seed with the first observed value to distinguish "no elements" from "elements
+   * meet to UNKNOWN". Subsequent elements actually meet. */
+  ctx->spec = (ctx->spec == (FilterXStaticTypeSpec) -1)
+              ? value_spec
+              : filterx_static_type_spec_meet(ctx->spec, value_spec);
+  /* Stop iterating once we've degraded to UNKNOWN — further meets can only stay there. */
+  return ctx->spec != 0;
+}
+
+static FilterXStaticTypeSpec
+_spec_from_filterx_object(FilterXObject *obj, gint depth_remaining)
+{
+  if (!obj)
+    return 0;
+
+  if (filterx_object_is_type_or_ref(obj, &FILTERX_TYPE_NAME(string)))
+    return filterx_static_type_kind_only(FILTERX_STATIC_TYPE_STRING);
+
+  if (filterx_object_is_type_or_ref(obj, &FILTERX_TYPE_NAME(integer)))
+    return filterx_static_type_kind_only(FILTERX_STATIC_TYPE_INTEGER);
+
+  if (depth_remaining <= 1)
+    {
+      if (filterx_object_is_type_or_ref(obj, &FILTERX_TYPE_NAME(dict)))
+        return filterx_static_type_kind_only(FILTERX_STATIC_TYPE_DICT);
+      if (filterx_object_is_type_or_ref(obj, &FILTERX_TYPE_NAME(list)))
+        return filterx_static_type_kind_only(FILTERX_STATIC_TYPE_LIST);
+      return 0;
+    }
+
+  FilterXStaticType outer_kind = FILTERX_STATIC_TYPE_UNKNOWN;
+  if (filterx_object_is_type_or_ref(obj, &FILTERX_TYPE_NAME(dict)))
+    outer_kind = FILTERX_STATIC_TYPE_DICT;
+  else if (filterx_object_is_type_or_ref(obj, &FILTERX_TYPE_NAME(list)))
+    outer_kind = FILTERX_STATIC_TYPE_LIST;
+  else
+    return 0;
+
+  /* Determine the meet of all element specs. Seed with a sentinel that distinguishes
+   * "no elements observed yet" from "element type is UNKNOWN". An empty container ends the
+   * iter with the sentinel and gets a FRESH element type — "element not yet committed" — so
+   * that the first write to it lifts the element to the written value's type (see
+   * filterx_type_env_update_on_write). FRESH is stripped before it reaches codegen. */
+  _LiteralElementMeetCtx ctx = { .spec = (FilterXStaticTypeSpec) -1, .depth_remaining = depth_remaining - 1 };
+  filterx_object_iter(obj, _collect_value_spec, &ctx);
+  FilterXStaticTypeSpec element_spec = (ctx.spec == (FilterXStaticTypeSpec) -1)
+                                       ? filterx_static_type_kind_only(FILTERX_STATIC_TYPE_FRESH)
+                                       : ctx.spec;
+  return filterx_static_type_make_container(outer_kind, element_spec);
+}
+
+static void
+_literal_infer_types(FilterXExpr *s, FilterXTypeEnv *env)
+{
+  FilterXLiteral *self = (FilterXLiteral *) s;
+  s->static_type = _spec_from_filterx_object(self->object, FILTERX_STATIC_TYPE_MAX_DEPTH);
+}
+
 #if SYSLOG_NG_ENABLE_JIT
 
 #include "filterx/jit/jit.h"
@@ -83,6 +161,7 @@ filterx_literal_init_instance(FilterXLiteral *s, FilterXObject *object)
   self->super.eval = _eval_literal;
   self->super.walk_children = _literal_walk;
   self->super.free_fn = _free;
+  self->super.infer_types = _literal_infer_types;
 #if SYSLOG_NG_ENABLE_JIT
   self->super.compile = _literal_compile;
 #endif
