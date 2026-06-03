@@ -83,6 +83,8 @@ _should_always_inline(const gchar *name)
     "fx_jit_do_getattr_dict",
     "fx_jit_do_setattr_dict",
     "fx_jit_do_nullv_setattr_dict",
+    "filterx_string_concat",
+    "fx_jit_do_plus_string",
   };
 
   for (gsize i = 0; i < G_N_ELEMENTS(allowlist); i++)
