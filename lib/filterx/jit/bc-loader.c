@@ -59,6 +59,7 @@ _add_function_attribute(LLVMContextRef ctx, LLVMValueRef fn, const gchar *attr_s
   LLVMAddAttributeAtIndex(fn, LLVMAttributeFunctionIndex, attr);
 }
 
+
 static void
 _mark_function_inline(LLVMContextRef ctx, LLVMValueRef fn)
 {
