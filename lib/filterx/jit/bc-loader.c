@@ -80,6 +80,9 @@ _should_always_inline(const gchar *name)
     "fx_jit_do_set_subscript_list",
     "fx_jit_do_nullv_set_subscript_dict",
     "fx_jit_do_nullv_set_subscript_list",
+    "fx_jit_do_getattr_dict",
+    "fx_jit_do_setattr_dict",
+    "fx_jit_do_nullv_setattr_dict",
   };
 
   for (gsize i = 0; i < G_N_ELEMENTS(allowlist); i++)
