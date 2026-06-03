@@ -70,10 +70,14 @@ _should_always_inline(const gchar *name)
     "filterx_dict_set_subscript_by_anchor",
     "filterx_dict_get_subscript",
     "filterx_dict_get_subscript_unchecked",
+    "filterx_dict_set_subscript",
     "filterx_list_get_subscript",
+    "filterx_list_set_subscript_via_key",
     "fx_jit_do_get_subscript_dict",
     "fx_jit_do_get_subscript_dict_string_key",
     "fx_jit_do_get_subscript_list",
+    "fx_jit_do_set_subscript_dict",
+    "fx_jit_do_set_subscript_list",
   };
 
   for (gsize i = 0; i < G_N_ELEMENTS(allowlist); i++)
