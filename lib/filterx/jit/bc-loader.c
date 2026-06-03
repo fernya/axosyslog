@@ -69,8 +69,10 @@ _should_always_inline(const gchar *name)
     "filterx_dict_get_anchor_for_key",
     "filterx_dict_set_subscript_by_anchor",
     "filterx_dict_get_subscript",
+    "filterx_dict_get_subscript_unchecked",
     "filterx_list_get_subscript",
     "fx_jit_do_get_subscript_dict",
+    "fx_jit_do_get_subscript_dict_string_key",
     "fx_jit_do_get_subscript_list",
   };
 

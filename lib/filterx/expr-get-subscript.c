@@ -219,6 +219,7 @@ filterx_get_subscript_get_operand(FilterXExpr *s)
 
 FX_JIT_DO_GET_SUBSCRIPT(dict, filterx_dict_get_subscript)
 FX_JIT_DO_GET_SUBSCRIPT(list, filterx_list_get_subscript)
+FX_JIT_DO_GET_SUBSCRIPT(dict_string_key, filterx_dict_get_subscript_unchecked)
 
 #undef FX_JIT_DO_GET_SUBSCRIPT
 
@@ -232,7 +233,11 @@ _get_subscript_compile(FilterXExpr *s, FilterXJIT *jit)
   switch (self->operand->static_type)
     {
     case FILTERX_STATIC_TYPE_DICT:
-      fn_name = "fx_jit_do_get_subscript_dict";
+      /* Dict keys must be hashable strings at runtime. When inference proves the key is a
+       * string, skip the runtime hashable check by dispatching to the unchecked variant. */
+      fn_name = self->key->static_type == FILTERX_STATIC_TYPE_STRING
+                ? "fx_jit_do_get_subscript_dict_string_key"
+                : "fx_jit_do_get_subscript_dict";
       break;
     case FILTERX_STATIC_TYPE_LIST:
       fn_name = "fx_jit_do_get_subscript_list";
