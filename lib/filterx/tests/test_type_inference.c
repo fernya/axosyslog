@@ -35,6 +35,10 @@
 #include "filterx/object-string.h"
 #include "filterx/object-dict.h"
 #include "filterx/object-list.h"
+#include "filterx/expr-get-subscript.h"
+#include "filterx/expr-getattr.h"
+#include "filterx/expr-set-subscript.h"
+#include "filterx/expr-setattr.h"
 
 #include "apphook.h"
 #include "scratch-buffers.h"
@@ -178,8 +182,148 @@ Test(filterx_type_inference, plus_of_two_strings_is_string)
                     filterx_literal_new(filterx_string_new("b", -1)));
   p = _run(p);
   /* plus optimizes literal+literal to a literal; either way the static_type should resolve. */
-  cr_assert_eq(p->static_type, FILTERX_STATIC_TYPE_STRING);
+  cr_assert_eq(filterx_static_type_kind(p->static_type), FILTERX_STATIC_TYPE_STRING);
   filterx_expr_unref(p);
+}
+
+/* ---- Phase 6: nested element-type tracking ---- */
+
+Test(filterx_type_inference, folded_literal_dict_of_string_tracks_element_type)
+{
+  /* {"a": "x", "b": "y"} — fully literal, folds to a single FilterXDict literal. */
+  GList *elems = NULL;
+  elems = g_list_append(elems, filterx_literal_element_new(
+                                filterx_literal_new(filterx_string_new("a", -1)),
+                                filterx_literal_new(filterx_string_new("x", -1))));
+  elems = g_list_append(elems, filterx_literal_element_new(
+                                filterx_literal_new(filterx_string_new("b", -1)),
+                                filterx_literal_new(filterx_string_new("y", -1))));
+  FilterXExpr *d = filterx_literal_dict_new(elems);
+  d = _run(d);
+
+  cr_assert_eq(filterx_static_type_kind(d->static_type), FILTERX_STATIC_TYPE_DICT);
+  cr_assert_eq(filterx_static_type_kind(filterx_static_type_element(d->static_type)),
+               FILTERX_STATIC_TYPE_STRING);
+  filterx_expr_unref(d);
+}
+
+Test(filterx_type_inference, folded_literal_depth3_dict_chain)
+{
+  /* {"l1": {"l2": {"l3": "leaf"}}}, fully literal → DICT_OF_DICT_OF_DICT_OF_STRING. */
+  GList *l3_elems = g_list_append(NULL, filterx_literal_element_new(
+                                        filterx_literal_new(filterx_string_new("l3", -1)),
+                                        filterx_literal_new(filterx_string_new("leaf", -1))));
+  GList *l2_elems = g_list_append(NULL, filterx_literal_element_new(
+                                        filterx_literal_new(filterx_string_new("l2", -1)),
+                                        filterx_literal_dict_new(l3_elems)));
+  GList *l1_elems = g_list_append(NULL, filterx_literal_element_new(
+                                        filterx_literal_new(filterx_string_new("l1", -1)),
+                                        filterx_literal_dict_new(l2_elems)));
+  FilterXExpr *d = filterx_literal_dict_new(l1_elems);
+  d = _run(d);
+
+  FilterXStaticTypeSpec spec = d->static_type;
+  cr_assert_eq(filterx_static_type_kind(spec), FILTERX_STATIC_TYPE_DICT);
+  spec = filterx_static_type_element(spec);
+  cr_assert_eq(filterx_static_type_kind(spec), FILTERX_STATIC_TYPE_DICT);
+  spec = filterx_static_type_element(spec);
+  cr_assert_eq(filterx_static_type_kind(spec), FILTERX_STATIC_TYPE_DICT);
+  spec = filterx_static_type_element(spec);
+  cr_assert_eq(filterx_static_type_kind(spec), FILTERX_STATIC_TYPE_STRING);
+  filterx_expr_unref(d);
+}
+
+Test(filterx_type_inference, mixed_value_types_in_literal_dict_collapse_element)
+{
+  /* {"a": "x", "b": [1, 2]} — string and list values; element type meets to UNKNOWN. */
+  GList *list_elems = g_list_append(NULL, filterx_literal_element_new(
+                                          NULL,
+                                          filterx_literal_new(filterx_integer_new(1))));
+  GList *elems = NULL;
+  elems = g_list_append(elems, filterx_literal_element_new(
+                                filterx_literal_new(filterx_string_new("a", -1)),
+                                filterx_literal_new(filterx_string_new("x", -1))));
+  elems = g_list_append(elems, filterx_literal_element_new(
+                                filterx_literal_new(filterx_string_new("b", -1)),
+                                filterx_literal_list_new(list_elems)));
+  FilterXExpr *d = filterx_literal_dict_new(elems);
+  d = _run(d);
+
+  cr_assert_eq(filterx_static_type_kind(d->static_type), FILTERX_STATIC_TYPE_DICT);
+  /* element type collapses because string and list don't meet. */
+  cr_assert_eq(filterx_static_type_element(d->static_type), 0);
+  filterx_expr_unref(d);
+}
+
+Test(filterx_type_inference, get_subscript_shifts_operand_spec)
+{
+  /* d = {"a": "x", "b": "y"} → DICT_OF_STRING. d["a"] → STRING. */
+  GList *elems = g_list_append(NULL, filterx_literal_element_new(
+                                      filterx_literal_new(filterx_string_new("a", -1)),
+                                      filterx_literal_new(filterx_string_new("x", -1))));
+  FilterXExpr *assign = filterx_assign_new(
+                         filterx_floating_variable_expr_new("d"),
+                         filterx_literal_dict_new(elems));
+  FilterXExpr *read = filterx_get_subscript_new(
+                       filterx_floating_variable_expr_new("d"),
+                       filterx_literal_new(filterx_string_new("a", -1)));
+  FilterXExpr *block = filterx_compound_expr_new_va(TRUE, assign, read, NULL);
+  block = _run(block);
+
+  cr_assert_eq(filterx_static_type_kind(read->static_type), FILTERX_STATIC_TYPE_STRING);
+  filterx_expr_unref(block);
+}
+
+Test(filterx_type_inference, getattr_chain_propagates_through_three_levels)
+{
+  /* d = {"a": {"b": {"c": "leaf"}}} → DICT_OF_DICT_OF_DICT_OF_STRING.
+   * d.a.b.c → STRING. */
+  GList *l3 = g_list_append(NULL, filterx_literal_element_new(
+                                   filterx_literal_new(filterx_string_new("c", -1)),
+                                   filterx_literal_new(filterx_string_new("leaf", -1))));
+  GList *l2 = g_list_append(NULL, filterx_literal_element_new(
+                                   filterx_literal_new(filterx_string_new("b", -1)),
+                                   filterx_literal_dict_new(l3)));
+  GList *l1 = g_list_append(NULL, filterx_literal_element_new(
+                                   filterx_literal_new(filterx_string_new("a", -1)),
+                                   filterx_literal_dict_new(l2)));
+  FilterXExpr *assign = filterx_assign_new(
+                         filterx_floating_variable_expr_new("d"),
+                         filterx_literal_dict_new(l1));
+  FilterXExpr *read_var = filterx_floating_variable_expr_new("d");
+  FilterXExpr *get_a = filterx_getattr_new(read_var, filterx_string_new("a", -1));
+  FilterXExpr *get_b = filterx_getattr_new(get_a, filterx_string_new("b", -1));
+  FilterXExpr *get_c = filterx_getattr_new(get_b, filterx_string_new("c", -1));
+  FilterXExpr *block = filterx_compound_expr_new_va(TRUE, assign, get_c, NULL);
+  block = _run(block);
+
+  cr_assert_eq(filterx_static_type_kind(read_var->static_type), FILTERX_STATIC_TYPE_DICT);
+  cr_assert_eq(filterx_static_type_kind(get_a->static_type), FILTERX_STATIC_TYPE_DICT);
+  cr_assert_eq(filterx_static_type_kind(get_b->static_type), FILTERX_STATIC_TYPE_DICT);
+  cr_assert_eq(filterx_static_type_kind(get_c->static_type), FILTERX_STATIC_TYPE_STRING);
+  filterx_expr_unref(block);
+}
+
+Test(filterx_type_inference, set_subscript_on_variable_pessimizes_element_type)
+{
+  /* d = {"a": "x"} → DICT_OF_STRING. d["b"] = 42; later read d → DICT (element UNKNOWN). */
+  GList *elems = g_list_append(NULL, filterx_literal_element_new(
+                                      filterx_literal_new(filterx_string_new("a", -1)),
+                                      filterx_literal_new(filterx_string_new("x", -1))));
+  FilterXExpr *assign = filterx_assign_new(
+                         filterx_floating_variable_expr_new("d"),
+                         filterx_literal_dict_new(elems));
+  FilterXExpr *set = filterx_set_subscript_new(
+                      filterx_floating_variable_expr_new("d"),
+                      filterx_literal_new(filterx_string_new("b", -1)),
+                      filterx_literal_new(filterx_integer_new(42)));
+  FilterXExpr *read = filterx_floating_variable_expr_new("d");
+  FilterXExpr *block = filterx_compound_expr_new_va(TRUE, assign, set, read, NULL);
+  block = _run(block);
+
+  cr_assert_eq(filterx_static_type_kind(read->static_type), FILTERX_STATIC_TYPE_DICT);
+  cr_assert_eq(filterx_static_type_element(read->static_type), 0);
+  filterx_expr_unref(block);
 }
 
 static void

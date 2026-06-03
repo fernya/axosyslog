@@ -61,18 +61,71 @@ _literal_walk(FilterXExpr *s, FilterXExprWalkFunc f, gpointer user_data)
   return TRUE;
 }
 
+/* Recursively determine the full FilterXStaticTypeSpec for a literal FilterXObject.
+ * Walks dict / list elements to compute element types, bottoming out at STRING / leaf
+ * types or at the depth cap (returns kind-only past the cap). */
+typedef struct
+{
+  FilterXStaticTypeSpec spec;
+  gint depth_remaining;
+} _LiteralElementMeetCtx;
+
+static FilterXStaticTypeSpec _spec_from_filterx_object(FilterXObject *obj, gint depth_remaining);
+
+static gboolean
+_collect_value_spec(FilterXObject *key, FilterXObject *value, gpointer user_data)
+{
+  _LiteralElementMeetCtx *ctx = (_LiteralElementMeetCtx *) user_data;
+  FilterXStaticTypeSpec value_spec = _spec_from_filterx_object(value, ctx->depth_remaining);
+  /* Seed with the first observed value to distinguish "no elements" from "elements
+   * meet to UNKNOWN". Subsequent elements actually meet. */
+  ctx->spec = (ctx->spec == (FilterXStaticTypeSpec) -1)
+              ? value_spec
+              : filterx_static_type_spec_meet(ctx->spec, value_spec);
+  /* Stop iterating once we've degraded to UNKNOWN — further meets can only stay there. */
+  return ctx->spec != 0;
+}
+
+static FilterXStaticTypeSpec
+_spec_from_filterx_object(FilterXObject *obj, gint depth_remaining)
+{
+  if (!obj)
+    return 0;
+
+  if (filterx_object_is_type_or_ref(obj, &FILTERX_TYPE_NAME(string)))
+    return filterx_static_type_kind_only(FILTERX_STATIC_TYPE_STRING);
+
+  if (depth_remaining <= 1)
+    {
+      if (filterx_object_is_type_or_ref(obj, &FILTERX_TYPE_NAME(dict)))
+        return filterx_static_type_kind_only(FILTERX_STATIC_TYPE_DICT);
+      if (filterx_object_is_type_or_ref(obj, &FILTERX_TYPE_NAME(list)))
+        return filterx_static_type_kind_only(FILTERX_STATIC_TYPE_LIST);
+      return 0;
+    }
+
+  FilterXStaticType outer_kind = FILTERX_STATIC_TYPE_UNKNOWN;
+  if (filterx_object_is_type_or_ref(obj, &FILTERX_TYPE_NAME(dict)))
+    outer_kind = FILTERX_STATIC_TYPE_DICT;
+  else if (filterx_object_is_type_or_ref(obj, &FILTERX_TYPE_NAME(list)))
+    outer_kind = FILTERX_STATIC_TYPE_LIST;
+  else
+    return 0;
+
+  /* Determine the meet of all element specs. Seed with a sentinel that distinguishes
+   * "no elements observed yet" from "element type is UNKNOWN". For an empty container,
+   * we end the iter with the sentinel and treat it as UNKNOWN. */
+  _LiteralElementMeetCtx ctx = { .spec = (FilterXStaticTypeSpec) -1, .depth_remaining = depth_remaining - 1 };
+  filterx_object_iter(obj, _collect_value_spec, &ctx);
+  FilterXStaticTypeSpec element_spec = (ctx.spec == (FilterXStaticTypeSpec) -1) ? 0 : ctx.spec;
+  return filterx_static_type_make_container(outer_kind, element_spec);
+}
+
 static void
 _literal_infer_types(FilterXExpr *s, FilterXTypeEnv *env)
 {
   FilterXLiteral *self = (FilterXLiteral *) s;
-  if (filterx_object_is_type_or_ref(self->object, &FILTERX_TYPE_NAME(dict)))
-    s->static_type = FILTERX_STATIC_TYPE_DICT;
-  else if (filterx_object_is_type_or_ref(self->object, &FILTERX_TYPE_NAME(list)))
-    s->static_type = FILTERX_STATIC_TYPE_LIST;
-  else if (filterx_object_is_type_or_ref(self->object, &FILTERX_TYPE_NAME(string)))
-    s->static_type = FILTERX_STATIC_TYPE_STRING;
-  else
-    s->static_type = FILTERX_STATIC_TYPE_UNKNOWN;
+  s->static_type = _spec_from_filterx_object(self->object, FILTERX_STATIC_TYPE_MAX_DEPTH);
 }
 
 #if SYSLOG_NG_ENABLE_JIT

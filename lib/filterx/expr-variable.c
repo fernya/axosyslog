@@ -211,7 +211,7 @@ _variable_infer_types(FilterXExpr *s, FilterXTypeEnv *env)
 {
   FilterXVariableExpr *self = (FilterXVariableExpr *) s;
   if (self->handle_is_macro)
-    s->static_type = FILTERX_STATIC_TYPE_UNKNOWN;
+    s->static_type = 0;
   else
     s->static_type = filterx_type_env_get(env, self->handle);
 }

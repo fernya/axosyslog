@@ -84,9 +84,11 @@ struct _FilterXExpr
 
   gboolean (*walk_children)(FilterXExpr *self, FilterXExprWalkFunc f, gpointer user_data);
 
-  /* set by filterx_expr_infer_types() to the static type the expression evaluates to,
-   * when provable from literals/typed constructors; UNKNOWN otherwise. */
-  FilterXStaticType static_type;
+  /* Set by filterx_expr_infer_types() to the static type spec the expression evaluates
+   * to, when provable from literals / typed constructors / propagation. UNKNOWN spec (0)
+   * otherwise. Packed: byte 0 is the outer kind, byte 1 the element type of that
+   * container, etc. */
+  FilterXStaticTypeSpec static_type;
 
   /* type of the expr, is not freed, assumed to be managed by something else
    * */

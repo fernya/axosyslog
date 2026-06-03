@@ -262,15 +262,15 @@ _compound_infer_types(FilterXExpr *s, FilterXTypeEnv *env)
   FilterXCompoundExpr *self = (FilterXCompoundExpr *) s;
   gsize n = filterx_expr_list_get_length(&self->exprs);
 
-  FilterXStaticType last = FILTERX_STATIC_TYPE_UNKNOWN;
+  FilterXStaticTypeSpec last = 0;
   for (gsize i = 0; i < n; i++)
     {
       FilterXExpr *child = filterx_expr_list_index(&self->exprs, i);
       filterx_expr_infer_types(child, env);
-      last = child ? child->static_type : FILTERX_STATIC_TYPE_UNKNOWN;
+      last = child ? child->static_type : 0;
     }
 
-  s->static_type = self->return_value_of_last_expr ? last : FILTERX_STATIC_TYPE_UNKNOWN;
+  s->static_type = self->return_value_of_last_expr ? last : 0;
 }
 
 #if SYSLOG_NG_ENABLE_JIT

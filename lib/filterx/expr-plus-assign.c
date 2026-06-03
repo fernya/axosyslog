@@ -59,21 +59,21 @@ _plus_assign_infer_types(FilterXExpr *s, FilterXTypeEnv *env)
   filterx_expr_infer_types(self->super.rhs, env);
   filterx_expr_infer_types(self->super.lhs, env);
 
-  FilterXStaticType rhs_type = self->super.rhs ? self->super.rhs->static_type : FILTERX_STATIC_TYPE_UNKNOWN;
+  FilterXStaticTypeSpec rhs_spec = self->super.rhs ? self->super.rhs->static_type : 0;
 
   /* For string+=string / list+=list / dict+=dict the result type matches; for any mismatch
    * (or unknown side) we collapse to UNKNOWN. The LHS env entry takes the same meet. */
   FilterXVariableHandle handle;
   if (filterx_variable_expr_get_handle(self->super.lhs, &handle))
     {
-      FilterXStaticType prior = filterx_type_env_get(env, handle);
-      FilterXStaticType result = filterx_static_type_meet(prior, rhs_type);
+      FilterXStaticTypeSpec prior = filterx_type_env_get(env, handle);
+      FilterXStaticTypeSpec result = filterx_static_type_spec_meet(prior, rhs_spec);
       filterx_type_env_set(env, handle, result);
       s->static_type = result;
     }
   else
     {
-      s->static_type = FILTERX_STATIC_TYPE_UNKNOWN;
+      s->static_type = 0;
     }
 }
 

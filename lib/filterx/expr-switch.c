@@ -325,7 +325,7 @@ _switch_infer_types(FilterXExpr *s, FilterXTypeEnv *env)
   filterx_type_env_meet_into(env, before);
   filterx_type_env_free(before);
 
-  s->static_type = FILTERX_STATIC_TYPE_UNKNOWN;
+  s->static_type = 0;
 }
 
 FilterXExpr *

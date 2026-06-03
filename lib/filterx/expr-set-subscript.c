@@ -20,6 +20,7 @@
  *
  */
 #include "filterx/expr-set-subscript.h"
+#include "filterx/expr-variable.h"
 #include "filterx/object-primitive.h"
 #include "filterx/filterx-eval.h"
 #include "filterx/object-null.h"
@@ -255,7 +256,7 @@ _compile_dispatch(FilterXExpr *s, FilterXJIT *jit, const gchar *fn_dict, const g
   /* v1: only specialize when we have a key expression. set_subscript with self->key == NULL
    * (e.g. list-append form) takes the interpreter path. */
   const gchar *fn_name;
-  switch (self->object->static_type)
+  switch (filterx_static_type_kind(self->object->static_type))
     {
     case FILTERX_STATIC_TYPE_DICT:
       fn_name = fn_dict;
@@ -296,6 +297,30 @@ _nullv_set_subscript_compile(FilterXExpr *s, FilterXJIT *jit)
 
 #endif
 
+/* Mutating the contents of a container variable invalidates any element-type info we
+ * had about it (we'd need either alias tracking or proof that the new value matches the
+ * existing element type to keep it). Pessimize the env entry to outer-kind-only. */
+static void
+_pessimize_container_var(FilterXExpr *container_expr, FilterXTypeEnv *env)
+{
+  FilterXVariableHandle handle;
+  if (!filterx_variable_expr_get_handle(container_expr, &handle))
+    return;
+  FilterXStaticTypeSpec prior = filterx_type_env_get(env, handle);
+  FilterXStaticType kind = filterx_static_type_kind(prior);
+  if (kind == FILTERX_STATIC_TYPE_UNKNOWN)
+    return;
+  filterx_type_env_set(env, handle, filterx_static_type_kind_only(kind));
+}
+
+static void
+_set_subscript_infer_types(FilterXExpr *s, FilterXTypeEnv *env)
+{
+  filterx_expr_infer_types_default(s, env);
+  FilterXSetSubscript *self = (FilterXSetSubscript *) s;
+  _pessimize_container_var(self->object, env);
+}
+
 static gboolean
 _set_subscript_walk(FilterXExpr *s, FilterXExprWalkFunc f, gpointer user_data)
 {
@@ -321,6 +346,7 @@ filterx_set_subscript_new(FilterXExpr *object, FilterXExpr *key, FilterXExpr *ne
   self->super.eval = _set_subscript_eval;
   self->super.walk_children = _set_subscript_walk;
   self->super.free_fn = _free;
+  self->super.infer_types = _set_subscript_infer_types;
 #if SYSLOG_NG_ENABLE_JIT
   self->super.compile = _set_subscript_compile;
 #endif

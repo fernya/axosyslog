@@ -146,6 +146,14 @@ _getattr_walk(FilterXExpr *s, FilterXExprWalkFunc f, gpointer user_data)
   return TRUE;
 }
 
+static void
+_getattr_infer_types(FilterXExpr *s, FilterXTypeEnv *env)
+{
+  filterx_expr_infer_types_default(s, env);
+  FilterXGetAttr *self = (FilterXGetAttr *) s;
+  s->static_type = filterx_static_type_element(self->operand ? self->operand->static_type : 0);
+}
+
 #if SYSLOG_NG_ENABLE_JIT
 
 #include "filterx/jit/jit.h"
@@ -189,7 +197,7 @@ _getattr_compile(FilterXExpr *s, FilterXJIT *jit)
   FilterXGetAttr *self = (FilterXGetAttr *) s;
   FilterXJITFFI *ffi = filterx_jit_get_ffi(jit);
 
-  const gchar *fn_name = self->operand->static_type == FILTERX_STATIC_TYPE_DICT
+  const gchar *fn_name = filterx_static_type_kind(self->operand->static_type) == FILTERX_STATIC_TYPE_DICT
                          ? "fx_jit_do_getattr_dict"
                          : "fx_jit_do_getattr";
 
@@ -218,6 +226,7 @@ filterx_getattr_new(FilterXExpr *operand, FilterXObject *attr_name)
   self->super.is_set = _isset;
   self->super.walk_children = _getattr_walk;
   self->super.free_fn = _free;
+  self->super.infer_types = _getattr_infer_types;
 #if SYSLOG_NG_ENABLE_JIT
   self->super.compile = _getattr_compile;
 #endif

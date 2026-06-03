@@ -166,6 +166,15 @@ _free(FilterXExpr *s)
   filterx_expr_free_method(s);
 }
 
+static void
+_get_subscript_infer_types(FilterXExpr *s, FilterXTypeEnv *env)
+{
+  filterx_expr_infer_types_default(s, env);
+  FilterXGetSubscript *self = (FilterXGetSubscript *) s;
+  /* Result is one nesting level shallower than the operand. */
+  s->static_type = filterx_static_type_element(self->operand ? self->operand->static_type : 0);
+}
+
 #if SYSLOG_NG_ENABLE_JIT
 
 #include "filterx/jit/jit.h"
@@ -213,12 +222,12 @@ _get_subscript_compile(FilterXExpr *s, FilterXJIT *jit)
   FilterXJITFFI *ffi = filterx_jit_get_ffi(jit);
 
   const gchar *fn_name;
-  switch (self->operand->static_type)
+  switch (filterx_static_type_kind(self->operand->static_type))
     {
     case FILTERX_STATIC_TYPE_DICT:
       /* Dict keys must be hashable strings at runtime. When inference proves the key is a
        * string, skip the runtime hashable check by dispatching to the unchecked variant. */
-      fn_name = self->key->static_type == FILTERX_STATIC_TYPE_STRING
+      fn_name = filterx_static_type_kind(self->key->static_type) == FILTERX_STATIC_TYPE_STRING
                 ? "fx_jit_do_get_subscript_dict_string_key"
                 : "fx_jit_do_get_subscript_dict";
       break;
@@ -267,6 +276,7 @@ filterx_get_subscript_new(FilterXExpr *operand, FilterXExpr *key)
   self->super.walk_children = _get_subscript_walk;
   self->super.move = _move;
   self->super.free_fn = _free;
+  self->super.infer_types = _get_subscript_infer_types;
 #if SYSLOG_NG_ENABLE_JIT
   self->super.compile = _get_subscript_compile;
 #endif

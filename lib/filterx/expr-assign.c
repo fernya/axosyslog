@@ -148,13 +148,13 @@ _assign_infer_types(FilterXExpr *s, FilterXTypeEnv *env)
    * see the env. We do not derive the assign's result type from the LHS's static_type. */
   filterx_expr_infer_types(self->super.lhs, env);
 
-  FilterXStaticType rhs_type = self->super.rhs ? self->super.rhs->static_type : FILTERX_STATIC_TYPE_UNKNOWN;
+  FilterXStaticTypeSpec rhs_spec = self->super.rhs ? self->super.rhs->static_type : 0;
 
   FilterXVariableHandle handle;
   if (filterx_variable_expr_get_handle(self->super.lhs, &handle))
-    filterx_type_env_set(env, handle, rhs_type);
+    filterx_type_env_set(env, handle, rhs_spec);
 
-  s->static_type = rhs_type;
+  s->static_type = rhs_spec;
 }
 
 static void
@@ -165,18 +165,18 @@ _nullv_assign_infer_types(FilterXExpr *s, FilterXTypeEnv *env)
   filterx_expr_infer_types(self->super.rhs, env);
   filterx_expr_infer_types(self->super.lhs, env);
 
-  FilterXStaticType rhs_type = self->super.rhs ? self->super.rhs->static_type : FILTERX_STATIC_TYPE_UNKNOWN;
+  FilterXStaticTypeSpec rhs_spec = self->super.rhs ? self->super.rhs->static_type : 0;
 
   /* nullv-assign keeps the LHS's prior value if RHS is null. The post-statement type is
-   * therefore meet(prior, rhs_type), and prior is what the env currently has. */
+   * therefore meet(prior, rhs), and prior is what the env currently has. */
   FilterXVariableHandle handle;
   if (filterx_variable_expr_get_handle(self->super.lhs, &handle))
     {
-      FilterXStaticType prior = filterx_type_env_get(env, handle);
-      filterx_type_env_set(env, handle, filterx_static_type_meet(prior, rhs_type));
+      FilterXStaticTypeSpec prior = filterx_type_env_get(env, handle);
+      filterx_type_env_set(env, handle, filterx_static_type_spec_meet(prior, rhs_spec));
     }
 
-  s->static_type = FILTERX_STATIC_TYPE_UNKNOWN;
+  s->static_type = 0;
 }
 
 static void

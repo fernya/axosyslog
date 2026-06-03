@@ -90,9 +90,9 @@ _plus_infer_types(FilterXExpr *s, FilterXTypeEnv *env)
 {
   filterx_expr_infer_types_default(s, env);
   FilterXOperatorPlus *self = (FilterXOperatorPlus *) s;
-  FilterXStaticType lhs_t = self->super.lhs ? self->super.lhs->static_type : FILTERX_STATIC_TYPE_UNKNOWN;
-  FilterXStaticType rhs_t = self->super.rhs ? self->super.rhs->static_type : FILTERX_STATIC_TYPE_UNKNOWN;
-  s->static_type = filterx_static_type_meet(lhs_t, rhs_t);
+  FilterXStaticTypeSpec lhs_spec = self->super.lhs ? self->super.lhs->static_type : 0;
+  FilterXStaticTypeSpec rhs_spec = self->super.rhs ? self->super.rhs->static_type : 0;
+  s->static_type = filterx_static_type_spec_meet(lhs_spec, rhs_spec);
 }
 
 static void
@@ -150,7 +150,7 @@ _compile_plus(FilterXExpr *s, FilterXJIT *jit)
   FilterXOperatorPlus *self = (FilterXOperatorPlus *) s;
   FilterXJITFFI *ffi = filterx_jit_get_ffi(jit);
 
-  const gchar *fn_name = s->static_type == FILTERX_STATIC_TYPE_STRING
+  const gchar *fn_name = filterx_static_type_kind(s->static_type) == FILTERX_STATIC_TYPE_STRING
                          ? "fx_jit_do_plus_string"
                          : "fx_jit_do_plus";
 

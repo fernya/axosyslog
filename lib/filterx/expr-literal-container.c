@@ -202,18 +202,41 @@ _literal_container_walk(FilterXExpr *s, FilterXExprWalkFunc f, gpointer user_dat
   return TRUE;
 }
 
+static FilterXStaticTypeSpec
+_meet_element_specs(FilterXLiteralContainer *self)
+{
+  /* Use a sentinel (~0) for "no element observed" so empty containers don't degrade
+   * the meet to UNKNOWN-from-zero. */
+  FilterXStaticTypeSpec acc = (FilterXStaticTypeSpec) -1;
+  gsize len = filterx_pointer_list_get_length(&self->elements);
+  for (gsize i = 0; i < len; i++)
+    {
+      FilterXLiteralElement *elem = (FilterXLiteralElement *) filterx_pointer_list_index(&self->elements, i);
+      FilterXStaticTypeSpec value_spec = elem->value ? elem->value->static_type : 0;
+      acc = (acc == (FilterXStaticTypeSpec) -1) ? value_spec
+                                                : filterx_static_type_spec_meet(acc, value_spec);
+      if (acc == 0)
+        break;
+    }
+  return acc == (FilterXStaticTypeSpec) -1 ? 0 : acc;
+}
+
 static void
 _literal_dict_infer_types(FilterXExpr *s, FilterXTypeEnv *env)
 {
   filterx_expr_infer_types_default(s, env);
-  s->static_type = FILTERX_STATIC_TYPE_DICT;
+  FilterXLiteralContainer *self = (FilterXLiteralContainer *) s;
+  s->static_type = filterx_static_type_make_container(FILTERX_STATIC_TYPE_DICT,
+                                                       _meet_element_specs(self));
 }
 
 static void
 _literal_list_infer_types(FilterXExpr *s, FilterXTypeEnv *env)
 {
   filterx_expr_infer_types_default(s, env);
-  s->static_type = FILTERX_STATIC_TYPE_LIST;
+  FilterXLiteralContainer *self = (FilterXLiteralContainer *) s;
+  s->static_type = filterx_static_type_make_container(FILTERX_STATIC_TYPE_LIST,
+                                                       _meet_element_specs(self));
 }
 
 static void

@@ -20,6 +20,7 @@
  *
  */
 #include "filterx/expr-setattr.h"
+#include "filterx/expr-variable.h"
 #include "filterx/object-primitive.h"
 #include "filterx/object-string.h"
 #include "filterx/filterx-eval.h"
@@ -143,6 +144,23 @@ _free(FilterXExpr *s)
   filterx_expr_free_method(s);
 }
 
+static void
+_setattr_infer_types(FilterXExpr *s, FilterXTypeEnv *env)
+{
+  filterx_expr_infer_types_default(s, env);
+  FilterXSetAttr *self = (FilterXSetAttr *) s;
+
+  /* Mutating contents invalidates element-type info. See _set_subscript_infer_types. */
+  FilterXVariableHandle handle;
+  if (filterx_variable_expr_get_handle(self->object, &handle))
+    {
+      FilterXStaticTypeSpec prior = filterx_type_env_get(env, handle);
+      FilterXStaticType kind = filterx_static_type_kind(prior);
+      if (kind != FILTERX_STATIC_TYPE_UNKNOWN)
+        filterx_type_env_set(env, handle, filterx_static_type_kind_only(kind));
+    }
+}
+
 static gboolean
 _setattr_walk(FilterXExpr *s, FilterXExprWalkFunc f, gpointer user_data)
 {
@@ -256,7 +274,7 @@ static FilterXIRValue
 _setattr_compile(FilterXExpr *s, FilterXJIT *jit)
 {
   FilterXSetAttr *self = (FilterXSetAttr *) s;
-  const gchar *fn_name = self->object->static_type == FILTERX_STATIC_TYPE_DICT
+  const gchar *fn_name = filterx_static_type_kind(self->object->static_type) == FILTERX_STATIC_TYPE_DICT
                          ? "fx_jit_do_setattr_dict"
                          : "fx_jit_do_setattr";
   return _emit_setattr_call(self, jit, fn_name);
@@ -266,7 +284,7 @@ static FilterXIRValue
 _nullv_setattr_compile(FilterXExpr *s, FilterXJIT *jit)
 {
   FilterXSetAttr *self = (FilterXSetAttr *) s;
-  const gchar *fn_name = self->object->static_type == FILTERX_STATIC_TYPE_DICT
+  const gchar *fn_name = filterx_static_type_kind(self->object->static_type) == FILTERX_STATIC_TYPE_DICT
                          ? "fx_jit_do_nullv_setattr_dict"
                          : "fx_jit_do_nullv_setattr";
   return _emit_setattr_call(self, jit, fn_name);
@@ -284,6 +302,7 @@ filterx_setattr_new(FilterXExpr *object, FilterXObject *attr_name, FilterXExpr *
   self->super.eval = _setattr_eval;
   self->super.walk_children = _setattr_walk;
   self->super.free_fn = _free;
+  self->super.infer_types = _setattr_infer_types;
 #if SYSLOG_NG_ENABLE_JIT
   self->super.compile = _setattr_compile;
 #endif

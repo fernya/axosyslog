@@ -278,7 +278,7 @@ filterx_expr_infer_types_default(FilterXExpr *self, FilterXTypeEnv *env)
   if (!filterx_expr_walk_children(self, _infer_types_child_exprs, env))
     g_assert_not_reached();
 
-  self->static_type = FILTERX_STATIC_TYPE_UNKNOWN;
+  self->static_type = 0;
 }
 
 FilterXExpr *
@@ -336,7 +336,7 @@ filterx_expr_init_instance(FilterXExpr *self, const gchar *type, FilterXEffect e
   self->plus_assign = filterx_expr_plus_assign_method;
   self->type = type;
   self->effects = effects;
-  self->static_type = FILTERX_STATIC_TYPE_UNKNOWN;
+  self->static_type = 0;
 }
 
 FilterXExpr *
