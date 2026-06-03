@@ -229,8 +229,40 @@ FX_JIT_DO_SET_SUBSCRIPT(list, filterx_list_set_subscript_via_key)
 
 #undef FX_JIT_DO_SET_SUBSCRIPT
 
+/* Null-coalescing variant: pass through if new_value is null/null-typed, otherwise delegate
+ * to the corresponding non-nullv wrapper. The slow path returns before evaluating key when
+ * new_value is null; the JIT path eagerly evaluates key in IR, so the wrapper unrefs the
+ * already-evaluated key on the short-circuit paths. Key expressions are conventionally
+ * literals with no side effects, so the eager-eval divergence is benign in practice. */
+#define FX_JIT_DO_NULLV_SET_SUBSCRIPT(suffix) \
+  __attribute__((used)) \
+  FilterXObject * \
+  fx_jit_do_nullv_set_subscript_ ## suffix(FilterXObject *object, FilterXObject *key, \
+                                           FilterXObject *new_value, FilterXExpr *expr) \
+  { \
+    if (!new_value) \
+      { \
+        filterx_eval_dump_errors("FilterX: null coalesce assignment suppressing error"); \
+        filterx_object_unref(object); \
+        filterx_object_unref(key); \
+        return filterx_null_new(); \
+      } \
+    if (filterx_object_extract_null(new_value)) \
+      { \
+        filterx_object_unref(object); \
+        filterx_object_unref(key); \
+        return new_value; \
+      } \
+    return fx_jit_do_set_subscript_ ## suffix(object, key, new_value, expr); \
+  }
+
+FX_JIT_DO_NULLV_SET_SUBSCRIPT(dict)
+FX_JIT_DO_NULLV_SET_SUBSCRIPT(list)
+
+#undef FX_JIT_DO_NULLV_SET_SUBSCRIPT
+
 static FilterXIRValue
-_set_subscript_compile(FilterXExpr *s, FilterXJIT *jit)
+_compile_dispatch(FilterXExpr *s, FilterXJIT *jit, const gchar *fn_dict, const gchar *fn_list)
 {
   FilterXSetSubscript *self = (FilterXSetSubscript *) s;
   FilterXJITFFI *ffi = filterx_jit_get_ffi(jit);
@@ -241,10 +273,10 @@ _set_subscript_compile(FilterXExpr *s, FilterXJIT *jit)
   switch (filterx_static_type_kind(self->object->static_type))
     {
     case FILTERX_STATIC_TYPE_DICT:
-      fn_name = "fx_jit_do_set_subscript_dict";
+      fn_name = fn_dict;
       break;
     case FILTERX_STATIC_TYPE_LIST:
-      fn_name = "fx_jit_do_set_subscript_list";
+      fn_name = fn_list;
       break;
     default:
       return fx_jit_emit_expr_eval(jit, s);
@@ -261,6 +293,20 @@ _set_subscript_compile(FilterXExpr *s, FilterXJIT *jit)
   FilterXIRValue args[] = { object, key, new_value, fx_jit_emit_const_ptr(jit, s) };
   FilterXIRType param_tys[] = { ffi->ptr_ty, ffi->ptr_ty, ffi->ptr_ty, ffi->ptr_ty };
   return fx_jit_emit_extern_call(jit, fn_name, ffi->ptr_ty, param_tys, args, 4);
+}
+
+static FilterXIRValue
+_set_subscript_compile(FilterXExpr *s, FilterXJIT *jit)
+{
+  return _compile_dispatch(s, jit, "fx_jit_do_set_subscript_dict",
+                           "fx_jit_do_set_subscript_list");
+}
+
+static FilterXIRValue
+_nullv_set_subscript_compile(FilterXExpr *s, FilterXJIT *jit)
+{
+  return _compile_dispatch(s, jit, "fx_jit_do_nullv_set_subscript_dict",
+                           "fx_jit_do_nullv_set_subscript_list");
 }
 
 #endif
@@ -308,5 +354,8 @@ filterx_nullv_set_subscript_new(FilterXExpr *object, FilterXExpr *key, FilterXEx
 
   self->type = "nullv_set_subscript";
   self->eval = _nullv_set_subscript_eval;
+#if SYSLOG_NG_ENABLE_JIT
+  self->compile = _nullv_set_subscript_compile;
+#endif
   return self;
 }
