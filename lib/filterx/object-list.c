@@ -27,6 +27,7 @@
 #include "filterx/filterx-mapping.h"
 #include "filterx/json-repr.h"
 #include "filterx/filterx-eval.h"
+#include "filterx/filterx-ref.h"
 #include "filterx/object-extractor.h"
 #include "filterx/json-repr.h"
 #include "filterx/expr-comparison.h"
@@ -405,6 +406,12 @@ filterx_list_new_from_args(FilterXExpr *s, FilterXObject *args[], gsize args_len
                                       "Argument must be a list or a string, got: %s",
                                       filterx_object_get_type_name(arg));
   return NULL;
+}
+
+FilterXObject *
+filterx_list_get_subscript(FilterXObject *s, FilterXObject *key)
+{
+  return _filterx_list_get_subscript(filterx_ref_unwrap_ro(s), key);
 }
 
 FILTERX_DEFINE_TYPE(list, FILTERX_TYPE_NAME(sequence),

@@ -52,15 +52,20 @@ _mark_symbol_available_externally(LLVMValueRef symbol)
 }
 
 static void
+_add_function_attribute(LLVMContextRef ctx, LLVMValueRef fn, const gchar *attr_str)
+{
+  guint attr_kind = LLVMGetEnumAttributeKindForName(attr_str, strlen(attr_str));
+  LLVMAttributeRef attr = LLVMCreateEnumAttribute(ctx, attr_kind, 0);
+  LLVMAddAttributeAtIndex(fn, LLVMAttributeFunctionIndex, attr);
+}
+
+static void
 _mark_function_inline(LLVMContextRef ctx, LLVMValueRef fn)
 {
   if (LLVMIsDeclaration(fn))
     return;
 
-  const gchar *inline_str = "inlinehint";
-  guint inline_kind = LLVMGetEnumAttributeKindForName(inline_str, strlen(inline_str));
-  LLVMAttributeRef inline_attr = LLVMCreateEnumAttribute(ctx, inline_kind, 0);
-  LLVMAddAttributeAtIndex(fn, LLVMAttributeFunctionIndex, inline_attr);
+  _add_function_attribute(ctx, fn, "inlinehint");
 }
 
 static void
