@@ -27,6 +27,7 @@
 #include "filterx/jit/jit.h"
 #include "filterx/jit/ffi.h"
 #include "filterx-object.h"
+#include "filterx/filterx-type-inference.h"
 #include "cfg-lexer.h"
 #include "stats/stats-counter.h"
 
@@ -78,9 +79,14 @@ struct _FilterXExpr
   void (*deinit)(FilterXExpr *self, GlobalConfig *cfg);
   FilterXExpr *(*optimize)(FilterXExpr *self);
   FilterXIRValue (*compile)(FilterXExpr *self, FilterXJIT *jit);
+  void (*infer_types)(FilterXExpr *self, FilterXTypeEnv *env);
   void (*free_fn)(FilterXExpr *self);
 
   gboolean (*walk_children)(FilterXExpr *self, FilterXExprWalkFunc f, gpointer user_data);
+
+  /* set by filterx_expr_infer_types() to the static type the expression evaluates to,
+   * when provable from literals/typed constructors; UNKNOWN otherwise. */
+  FilterXStaticType static_type;
 
   /* type of the expr, is not freed, assumed to be managed by something else
    * */
@@ -247,6 +253,11 @@ void filterx_expr_deinit_method(FilterXExpr *self, GlobalConfig *cfg);
 
 gboolean filterx_expr_init(FilterXExpr *self, GlobalConfig *cfg);
 void filterx_expr_deinit(FilterXExpr *self, GlobalConfig *cfg);
+
+/* Default infer_types implementation: walks children with the current env and leaves
+ * self->static_type at UNKNOWN. Provided as a callable so per-expr overrides can chain
+ * to it when they only need to add a post-step (e.g. to set their own static_type). */
+void filterx_expr_infer_types_default(FilterXExpr *self, FilterXTypeEnv *env);
 
 static inline gboolean
 filterx_expr_visit(FilterXExpr *self, FilterXExpr **expr, FilterXExprWalkFunc f, gpointer user_data)

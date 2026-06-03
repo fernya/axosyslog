@@ -21,6 +21,9 @@
  */
 #include "filterx/expr-literal.h"
 #include "filterx/filterx-eval.h"
+#include "filterx/object-dict.h"
+#include "filterx/object-list.h"
+#include "filterx/object-string.h"
 
 typedef struct _FilterXLiteral
 {
@@ -58,6 +61,20 @@ _literal_walk(FilterXExpr *s, FilterXExprWalkFunc f, gpointer user_data)
   return TRUE;
 }
 
+static void
+_literal_infer_types(FilterXExpr *s, FilterXTypeEnv *env)
+{
+  FilterXLiteral *self = (FilterXLiteral *) s;
+  if (filterx_object_is_type_or_ref(self->object, &FILTERX_TYPE_NAME(dict)))
+    s->static_type = FILTERX_STATIC_TYPE_DICT;
+  else if (filterx_object_is_type_or_ref(self->object, &FILTERX_TYPE_NAME(list)))
+    s->static_type = FILTERX_STATIC_TYPE_LIST;
+  else if (filterx_object_is_type_or_ref(self->object, &FILTERX_TYPE_NAME(string)))
+    s->static_type = FILTERX_STATIC_TYPE_STRING;
+  else
+    s->static_type = FILTERX_STATIC_TYPE_UNKNOWN;
+}
+
 #if SYSLOG_NG_ENABLE_JIT
 
 #include "filterx/jit/jit.h"
@@ -83,6 +100,7 @@ filterx_literal_init_instance(FilterXLiteral *s, FilterXObject *object)
   self->super.eval = _eval_literal;
   self->super.walk_children = _literal_walk;
   self->super.free_fn = _free;
+  self->super.infer_types = _literal_infer_types;
 #if SYSLOG_NG_ENABLE_JIT
   self->super.compile = _literal_compile;
 #endif

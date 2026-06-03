@@ -25,11 +25,16 @@
 #include "filterx/filterx-expr.h"
 #include "filterx/filterx-config.h"
 #include "filterx/object-string.h"
+#include "filterx/filterx-variable.h"
 #include "cfg.h"
 
 FilterXExpr *filterx_msg_variable_expr_new(const gchar *name);
 FilterXExpr *filterx_floating_variable_expr_new(const gchar *name);
 void filterx_variable_expr_declare(FilterXExpr *s);
+
+/* Returns TRUE and fills @handle_out if @s is a variable whose handle is suitable for
+ * static type tracking (i.e. not a macro-backed message variable). */
+gboolean filterx_variable_expr_get_handle(FilterXExpr *s, FilterXVariableHandle *handle_out);
 
 
 FILTERX_EXPR_DECLARE_TYPE(variable);

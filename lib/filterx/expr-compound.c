@@ -256,6 +256,23 @@ _compound_walk(FilterXExpr *s, FilterXExprWalkFunc f, gpointer user_data)
   return filterx_expr_list_foreach_ref(&self->exprs, _expr_walk_cb, args);
 }
 
+static void
+_compound_infer_types(FilterXExpr *s, FilterXTypeEnv *env)
+{
+  FilterXCompoundExpr *self = (FilterXCompoundExpr *) s;
+  gsize n = filterx_expr_list_get_length(&self->exprs);
+
+  FilterXStaticType last = FILTERX_STATIC_TYPE_UNKNOWN;
+  for (gsize i = 0; i < n; i++)
+    {
+      FilterXExpr *child = filterx_expr_list_index(&self->exprs, i);
+      filterx_expr_infer_types(child, env);
+      last = child ? child->static_type : FILTERX_STATIC_TYPE_UNKNOWN;
+    }
+
+  s->static_type = self->return_value_of_last_expr ? last : FILTERX_STATIC_TYPE_UNKNOWN;
+}
+
 #if SYSLOG_NG_ENABLE_JIT
 
 #include "filterx/jit/jit.h"
@@ -413,6 +430,7 @@ filterx_compound_expr_new(gboolean return_value_of_last_expr)
   self->super.init = _init;
   self->super.walk_children = _compound_walk;
   self->super.free_fn = _free;
+  self->super.infer_types = _compound_infer_types;
 #if SYSLOG_NG_ENABLE_JIT
   self->super.compile = _compound_compile;
 #endif

@@ -86,6 +86,16 @@ _optimize(FilterXExpr *s)
 }
 
 static void
+_plus_infer_types(FilterXExpr *s, FilterXTypeEnv *env)
+{
+  filterx_expr_infer_types_default(s, env);
+  FilterXOperatorPlus *self = (FilterXOperatorPlus *) s;
+  FilterXStaticType lhs_t = self->super.lhs ? self->super.lhs->static_type : FILTERX_STATIC_TYPE_UNKNOWN;
+  FilterXStaticType rhs_t = self->super.rhs ? self->super.rhs->static_type : FILTERX_STATIC_TYPE_UNKNOWN;
+  s->static_type = filterx_static_type_meet(lhs_t, rhs_t);
+}
+
+static void
 _filterx_operator_plus_free(FilterXExpr *s)
 {
   FilterXOperatorPlus *self = (FilterXOperatorPlus *) s;
@@ -134,6 +144,7 @@ filterx_operator_plus_new(FilterXExpr *lhs, FilterXExpr *rhs)
   filterx_binary_op_init_instance(&self->super, "plus", FXE_READ, lhs, rhs);
   self->super.super.optimize = _optimize;
   self->super.super.eval = _eval_plus;
+  self->super.super.infer_types = _plus_infer_types;
   self->super.super.free_fn = _filterx_operator_plus_free;
 #if SYSLOG_NG_ENABLE_JIT
   self->super.super.compile = _compile_plus;
