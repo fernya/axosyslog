@@ -30,6 +30,7 @@
 #include "filterx/object-message-value.h"
 #include "filterx/json-repr.h"
 #include "filterx/filterx-object.h"
+#include "filterx/filterx-ref.h"
 #include "filterx/filterx-eval.h"
 #include "utf8utils.h"
 #include "str-format.h"
@@ -840,6 +841,12 @@ filterx_dict_set_subscript_by_anchor(FilterXObject *s, FilterXDictAnchor anchor,
   filterx_object_unref(entry->value);
 
   entry->value = filterx_object_cow_store(new_value);
+}
+
+FilterXObject *
+filterx_dict_get_subscript(FilterXObject *s, FilterXObject *key)
+{
+  return _filterx_dict_get_subscript(filterx_ref_unwrap_ro(s), key);
 }
 
 FilterXObject *
