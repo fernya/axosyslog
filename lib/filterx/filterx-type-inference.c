@@ -22,6 +22,9 @@
 
 #include "filterx/filterx-type-inference.h"
 #include "filterx/filterx-expr.h"
+#include "filterx/expr-variable.h"
+#include "filterx/expr-getattr.h"
+#include "filterx/expr-get-subscript.h"
 
 struct _FilterXTypeEnv
 {
@@ -148,4 +151,61 @@ filterx_expr_infer_types_root(FilterXExpr *root)
   FilterXTypeEnv *env = filterx_type_env_new();
   filterx_expr_infer_types(root, env);
   filterx_type_env_free(env);
+}
+
+/* Walk a getattr/get_subscript chain down to its root variable, counting the number of
+ * hops. Returns FALSE if the chain does not bottom out at a trackable (non-macro) variable. */
+static gboolean
+_walk_to_root_variable(FilterXExpr *expr, FilterXVariableHandle *handle_out, gint *depth_out)
+{
+  gint depth = 0;
+  while (expr)
+    {
+      if (filterx_variable_expr_get_handle(expr, handle_out))
+        {
+          *depth_out = depth;
+          return TRUE;
+        }
+      if (filterx_expr_is_getattr(expr))
+        expr = filterx_getattr_get_operand(expr);
+      else if (filterx_expr_is_get_subscript(expr))
+        expr = filterx_get_subscript_get_operand(expr);
+      else
+        return FALSE;
+      depth++;
+    }
+  return FALSE;
+}
+
+void
+filterx_type_env_update_on_write(FilterXTypeEnv *env, FilterXExpr *container_expr,
+                                 FilterXStaticTypeSpec value_spec)
+{
+  FilterXVariableHandle handle;
+  gint depth;
+  if (!_walk_to_root_variable(container_expr, &handle, &depth))
+    return;
+
+  /* The written value lands one level below the container we wrote into. */
+  gint level = depth + 1;
+  if (level >= FILTERX_STATIC_TYPE_MAX_DEPTH)
+    return;
+
+  FilterXStaticTypeSpec old = filterx_type_env_get(env, handle);
+  if (filterx_static_type_kind(old) == FILTERX_STATIC_TYPE_UNKNOWN)
+    return;
+
+  guint shift = (guint) level * FILTERX_STATIC_TYPE_LEVEL_BITS;
+  FilterXStaticType level_kind = (FilterXStaticType)((old >> shift) & FILTERX_STATIC_TYPE_LEVEL_MASK);
+
+  FilterXStaticTypeSpec tail;
+  if (level_kind == FILTERX_STATIC_TYPE_FRESH)
+    tail = value_spec;                                              /* lift: commit to the written type */
+  else if (level_kind == FILTERX_STATIC_TYPE_UNKNOWN)
+    return;                                                         /* no committed type to refine */
+  else
+    tail = filterx_static_type_spec_meet(old >> shift, value_spec); /* meet with the committed type */
+
+  FilterXStaticTypeSpec low_mask = (1u << shift) - 1; /* keep levels below @level (shift >= 8) */
+  filterx_type_env_set(env, handle, (old & low_mask) | (tail << shift));
 }

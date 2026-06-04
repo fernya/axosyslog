@@ -113,11 +113,15 @@ _spec_from_filterx_object(FilterXObject *obj, gint depth_remaining)
     return 0;
 
   /* Determine the meet of all element specs. Seed with a sentinel that distinguishes
-   * "no elements observed yet" from "element type is UNKNOWN". For an empty container,
-   * we end the iter with the sentinel and treat it as UNKNOWN. */
+   * "no elements observed yet" from "element type is UNKNOWN". An empty container ends the
+   * iter with the sentinel and gets a FRESH element type — "element not yet committed" — so
+   * that the first write to it lifts the element to the written value's type (see
+   * filterx_type_env_update_on_write). FRESH is stripped before it reaches codegen. */
   _LiteralElementMeetCtx ctx = { .spec = (FilterXStaticTypeSpec) -1, .depth_remaining = depth_remaining - 1 };
   filterx_object_iter(obj, _collect_value_spec, &ctx);
-  FilterXStaticTypeSpec element_spec = (ctx.spec == (FilterXStaticTypeSpec) -1) ? 0 : ctx.spec;
+  FilterXStaticTypeSpec element_spec = (ctx.spec == (FilterXStaticTypeSpec) -1)
+                                       ? filterx_static_type_kind_only(FILTERX_STATIC_TYPE_FRESH)
+                                       : ctx.spec;
   return filterx_static_type_make_container(outer_kind, element_spec);
 }
 

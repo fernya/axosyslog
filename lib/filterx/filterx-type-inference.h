@@ -31,6 +31,14 @@ typedef enum
   FILTERX_STATIC_TYPE_DICT    = 1,
   FILTERX_STATIC_TYPE_LIST    = 2,
   FILTERX_STATIC_TYPE_STRING  = 3,
+  /* Sentinel for "freshly built empty container, element type not yet committed".
+   * Seeded by literal inference for empty {} / [] containers and carried through the
+   * env, where the first write to the container lifts it to the written value's type
+   * (see filterx_type_env_update_on_write). It must never reach codegen as if it were
+   * a real type: it is stripped from any expression's exposed static_type by
+   * filterx_static_type_sanitize() (used by element() and by variable inference).
+   * Devirt decisions only read level 0 (filterx_static_type_kind), which is never FRESH. */
+  FILTERX_STATIC_TYPE_FRESH   = 0xfe,
 } FilterXStaticType;
 
 /* FilterXStaticTypeSpec: a packed nested type spec, one byte per nesting level.
@@ -59,16 +67,33 @@ filterx_static_type_kind(FilterXStaticTypeSpec spec)
   return (FilterXStaticType)(spec & FILTERX_STATIC_TYPE_LEVEL_MASK);
 }
 
+/* Strip the FRESH lift-tracking sentinel before a spec is exposed on any expression's
+ * static_type: clear from the first FRESH level onward (FRESH implies "no committed type
+ * here or below"). Specs without FRESH pass through unchanged. */
+static inline FilterXStaticTypeSpec
+filterx_static_type_sanitize(FilterXStaticTypeSpec spec)
+{
+  for (gint level = 0; level < FILTERX_STATIC_TYPE_MAX_DEPTH; level++)
+    {
+      guint shift = level * FILTERX_STATIC_TYPE_LEVEL_BITS;
+      FilterXStaticType lvl = (FilterXStaticType)((spec >> shift) & FILTERX_STATIC_TYPE_LEVEL_MASK);
+      if (lvl == FILTERX_STATIC_TYPE_FRESH)
+        return (shift == 0) ? 0 : (spec & ((1u << shift) - 1));
+    }
+  return spec;
+}
+
 /* Drop the outermost level: returns the element type spec.
  * Element of {DICT, STRING, UNKNOWN, UNKNOWN} → {STRING, UNKNOWN, UNKNOWN, UNKNOWN}.
- * Element of {STRING, ...} or {UNKNOWN, ...} → all-UNKNOWN. */
+ * Element of {STRING, ...} or {UNKNOWN, ...} → all-UNKNOWN.
+ * The element of a FRESH-empty container sanitizes to UNKNOWN. */
 static inline FilterXStaticTypeSpec
 filterx_static_type_element(FilterXStaticTypeSpec spec)
 {
   FilterXStaticType kind = filterx_static_type_kind(spec);
   if (kind != FILTERX_STATIC_TYPE_DICT && kind != FILTERX_STATIC_TYPE_LIST)
     return 0;
-  return spec >> FILTERX_STATIC_TYPE_LEVEL_BITS;
+  return filterx_static_type_sanitize(spec >> FILTERX_STATIC_TYPE_LEVEL_BITS);
 }
 
 /* Build a container spec from an outer kind and the element spec. Shifts @element up
@@ -107,5 +132,21 @@ void filterx_type_env_meet_into(FilterXTypeEnv *dst, const FilterXTypeEnv *src);
 struct _FilterXExpr;
 void filterx_expr_infer_types(struct _FilterXExpr *self, FilterXTypeEnv *env);
 void filterx_expr_infer_types_root(struct _FilterXExpr *root);
+
+/* Update the env after a write `container_expr.<key> = value` (setattr / set_subscript).
+ * Walks @container_expr down to its root variable, counting the getattr/get_subscript depth
+ * d, and refines the variable's spec at level d+1 using the lift-or-meet rule:
+ *
+ *   prior level kind = FRESH    → lift: commit the level to @value_spec (the just-written
+ *                                 value's full nested type, including its own FRESH).
+ *   prior level kind = known T  → meet(T-tail, value_spec): divergent kinds collapse to
+ *                                 UNKNOWN, demoting a now-heterogeneous container.
+ *   prior level kind = UNKNOWN  → leave (no committed type to refine from).
+ *
+ * A no-op if @container_expr is not rooted at a trackable variable, if the root has no known
+ * container kind, or if the written level is at/past the depth cap. */
+void filterx_type_env_update_on_write(FilterXTypeEnv *env,
+                                      struct _FilterXExpr *container_expr,
+                                      FilterXStaticTypeSpec value_spec);
 
 #endif

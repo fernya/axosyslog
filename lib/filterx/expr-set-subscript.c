@@ -297,28 +297,18 @@ _nullv_set_subscript_compile(FilterXExpr *s, FilterXJIT *jit)
 
 #endif
 
-/* Mutating the contents of a container variable invalidates any element-type info we
- * had about it (we'd need either alias tracking or proof that the new value matches the
- * existing element type to keep it). Pessimize the env entry to outer-kind-only. */
-static void
-_pessimize_container_var(FilterXExpr *container_expr, FilterXTypeEnv *env)
-{
-  FilterXVariableHandle handle;
-  if (!filterx_variable_expr_get_handle(container_expr, &handle))
-    return;
-  FilterXStaticTypeSpec prior = filterx_type_env_get(env, handle);
-  FilterXStaticType kind = filterx_static_type_kind(prior);
-  if (kind == FILTERX_STATIC_TYPE_UNKNOWN)
-    return;
-  filterx_type_env_set(env, handle, filterx_static_type_kind_only(kind));
-}
-
 static void
 _set_subscript_infer_types(FilterXExpr *s, FilterXTypeEnv *env)
 {
   filterx_expr_infer_types_default(s, env);
   FilterXSetSubscript *self = (FilterXSetSubscript *) s;
-  _pessimize_container_var(self->object, env);
+
+  /* Refine the written container's element type with the assigned value (lift if the level
+   * was a freshly-built empty container, meet otherwise). This keeps element-type info alive
+   * across incremental builds (l = []; l[0] = {}; l[0].x = {}; ...) so deeper accesses
+   * devirtualize. */
+  filterx_type_env_update_on_write(env, self->object,
+                                   self->new_value ? self->new_value->static_type : 0);
 }
 
 static gboolean

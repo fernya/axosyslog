@@ -175,6 +175,14 @@ _get_subscript_infer_types(FilterXExpr *s, FilterXTypeEnv *env)
   s->static_type = filterx_static_type_element(self->operand ? self->operand->static_type : 0);
 }
 
+FilterXExpr *
+filterx_get_subscript_get_operand(FilterXExpr *s)
+{
+  if (!filterx_expr_is_get_subscript(s))
+    return NULL;
+  return ((FilterXGetSubscript *) s)->operand;
+}
+
 #if SYSLOG_NG_ENABLE_JIT
 
 #include "filterx/jit/jit.h"

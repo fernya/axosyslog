@@ -65,8 +65,10 @@ Test(filterx_type_inference, literal_dict_is_dict)
   FilterXExpr *empty_dict = filterx_literal_dict_new(NULL);
   empty_dict = _run(empty_dict);
   /* Fully-literal containers fold to a 'literal' expr at optimize time, and the
-   * literal's inference reads the underlying FilterXObject type. */
-  cr_assert_eq(empty_dict->static_type, FILTERX_STATIC_TYPE_DICT);
+   * literal's inference reads the underlying FilterXObject type. An empty container carries
+   * the FRESH element sentinel internally; the kind is DICT and element() sanitizes to UNKNOWN. */
+  cr_assert_eq(filterx_static_type_kind(empty_dict->static_type), FILTERX_STATIC_TYPE_DICT);
+  cr_assert_eq(filterx_static_type_element(empty_dict->static_type), FILTERX_STATIC_TYPE_UNKNOWN);
   filterx_expr_unref(empty_dict);
 }
 
@@ -74,7 +76,8 @@ Test(filterx_type_inference, literal_list_is_list)
 {
   FilterXExpr *empty_list = filterx_literal_list_new(NULL);
   empty_list = _run(empty_list);
-  cr_assert_eq(empty_list->static_type, FILTERX_STATIC_TYPE_LIST);
+  cr_assert_eq(filterx_static_type_kind(empty_list->static_type), FILTERX_STATIC_TYPE_LIST);
+  cr_assert_eq(filterx_static_type_element(empty_list->static_type), FILTERX_STATIC_TYPE_UNKNOWN);
   filterx_expr_unref(empty_list);
 }
 
@@ -323,6 +326,188 @@ Test(filterx_type_inference, set_subscript_on_variable_pessimizes_element_type)
 
   cr_assert_eq(filterx_static_type_kind(read->static_type), FILTERX_STATIC_TYPE_DICT);
   cr_assert_eq(filterx_static_type_element(read->static_type), 0);
+  filterx_expr_unref(block);
+}
+
+/* ---- incremental container building (lift-on-write) ---- */
+
+Test(filterx_type_inference, incremental_dict_build_tracks_nested_element_types)
+{
+  /* meta = {}; meta.a = {}; meta.a.b = {};  → meta is DICT_OF_DICT_OF_DICT.
+   * Reads of meta, meta.a, meta.a.b all resolve to DICT — the incremental build matches
+   * what a nested literal would have produced, so the deep chain devirtualizes. */
+  FilterXExpr *assign_meta = filterx_assign_new(
+                              filterx_floating_variable_expr_new("meta"),
+                              filterx_literal_dict_new(NULL));
+  FilterXExpr *set_a = filterx_setattr_new(
+                        filterx_floating_variable_expr_new("meta"),
+                        filterx_string_new("a", -1),
+                        filterx_literal_dict_new(NULL));
+  FilterXExpr *set_ab = filterx_setattr_new(
+                         filterx_getattr_new(filterx_floating_variable_expr_new("meta"),
+                                             filterx_string_new("a", -1)),
+                         filterx_string_new("b", -1),
+                         filterx_literal_dict_new(NULL));
+
+  FilterXExpr *read_meta = filterx_floating_variable_expr_new("meta");
+  FilterXExpr *read_a = filterx_getattr_new(filterx_floating_variable_expr_new("meta"),
+                                            filterx_string_new("a", -1));
+  FilterXExpr *read_ab = filterx_getattr_new(
+                          filterx_getattr_new(filterx_floating_variable_expr_new("meta"),
+                                              filterx_string_new("a", -1)),
+                          filterx_string_new("b", -1));
+
+  FilterXExpr *block = filterx_compound_expr_new_va(TRUE, assign_meta, set_a, set_ab,
+                                                    read_meta, read_a, read_ab, NULL);
+  block = _run(block);
+
+  cr_assert_eq(filterx_static_type_kind(read_meta->static_type), FILTERX_STATIC_TYPE_DICT);
+  cr_assert_eq(filterx_static_type_kind(read_a->static_type), FILTERX_STATIC_TYPE_DICT);
+  cr_assert_eq(filterx_static_type_kind(read_ab->static_type), FILTERX_STATIC_TYPE_DICT);
+  filterx_expr_unref(block);
+}
+
+Test(filterx_type_inference, incremental_build_demotes_on_heterogeneous_sibling)
+{
+  /* meta = {}; meta.a = {}; meta.b = "s";  → meta has mixed element types, so its element
+   * collapses to UNKNOWN and meta.a no longer devirtualizes. */
+  FilterXExpr *assign_meta = filterx_assign_new(
+                              filterx_floating_variable_expr_new("meta"),
+                              filterx_literal_dict_new(NULL));
+  FilterXExpr *set_a = filterx_setattr_new(
+                        filterx_floating_variable_expr_new("meta"),
+                        filterx_string_new("a", -1),
+                        filterx_literal_dict_new(NULL));
+  FilterXExpr *set_b = filterx_setattr_new(
+                        filterx_floating_variable_expr_new("meta"),
+                        filterx_string_new("b", -1),
+                        filterx_literal_new(filterx_string_new("s", -1)));
+  FilterXExpr *read_a = filterx_getattr_new(filterx_floating_variable_expr_new("meta"),
+                                            filterx_string_new("a", -1));
+
+  FilterXExpr *block = filterx_compound_expr_new_va(TRUE, assign_meta, set_a, set_b, read_a, NULL);
+  block = _run(block);
+
+  cr_assert_eq(read_a->static_type, FILTERX_STATIC_TYPE_UNKNOWN);
+  filterx_expr_unref(block);
+}
+
+Test(filterx_type_inference, non_container_write_commits_level_and_blocks_later_lift)
+{
+  /* meta = {}; meta.x = 5; meta.y = {};  → the int write commits meta's element to UNKNOWN,
+   * so the later {} write must NOT lift it back to DICT. */
+  FilterXExpr *assign_meta = filterx_assign_new(
+                              filterx_floating_variable_expr_new("meta"),
+                              filterx_literal_dict_new(NULL));
+  FilterXExpr *set_x = filterx_setattr_new(
+                        filterx_floating_variable_expr_new("meta"),
+                        filterx_string_new("x", -1),
+                        filterx_literal_new(filterx_integer_new(5)));
+  FilterXExpr *set_y = filterx_setattr_new(
+                        filterx_floating_variable_expr_new("meta"),
+                        filterx_string_new("y", -1),
+                        filterx_literal_dict_new(NULL));
+  FilterXExpr *read_y = filterx_getattr_new(filterx_floating_variable_expr_new("meta"),
+                                            filterx_string_new("y", -1));
+
+  FilterXExpr *block = filterx_compound_expr_new_va(TRUE, assign_meta, set_x, set_y, read_y, NULL);
+  block = _run(block);
+
+  cr_assert_eq(read_y->static_type, FILTERX_STATIC_TYPE_UNKNOWN);
+  filterx_expr_unref(block);
+}
+
+Test(filterx_type_inference, incremental_list_build_tracks_element_type)
+{
+  /* l = []; l[0] = {};  → l is LIST_OF_DICT, so l[0] resolves to DICT. */
+  FilterXExpr *assign_l = filterx_assign_new(
+                           filterx_floating_variable_expr_new("l"),
+                           filterx_literal_list_new(NULL));
+  FilterXExpr *set_0 = filterx_set_subscript_new(
+                        filterx_floating_variable_expr_new("l"),
+                        filterx_literal_new(filterx_integer_new(0)),
+                        filterx_literal_dict_new(NULL));
+  FilterXExpr *read_0 = filterx_get_subscript_new(
+                         filterx_floating_variable_expr_new("l"),
+                         filterx_literal_new(filterx_integer_new(0)));
+
+  FilterXExpr *block = filterx_compound_expr_new_va(TRUE, assign_l, set_0, read_0, NULL);
+  block = _run(block);
+
+  cr_assert_eq(filterx_static_type_kind(read_0->static_type), FILTERX_STATIC_TYPE_DICT);
+  filterx_expr_unref(block);
+}
+
+Test(filterx_type_inference, one_sided_branch_write_collapses_element_to_unknown)
+{
+  /* meta = {}; if (c) { meta.a = {}; } meta.a  → element is UNKNOWN after the join (one
+   * branch lifted it, the other left it fresh-empty; the meet is conservative). */
+  FilterXExpr *assign_meta = filterx_assign_new(
+                              filterx_floating_variable_expr_new("meta"),
+                              filterx_literal_dict_new(NULL));
+  FilterXExpr *set_a = filterx_setattr_new(
+                        filterx_floating_variable_expr_new("meta"),
+                        filterx_string_new("a", -1),
+                        filterx_literal_dict_new(NULL));
+  FilterXExpr *iff = filterx_conditional_new(filterx_floating_variable_expr_new("c"));
+  filterx_conditional_set_true_branch(iff, set_a);
+
+  FilterXExpr *read_a = filterx_getattr_new(filterx_floating_variable_expr_new("meta"),
+                                            filterx_string_new("a", -1));
+  FilterXExpr *block = filterx_compound_expr_new_va(TRUE, assign_meta, iff, read_a, NULL);
+  block = _run(block);
+
+  cr_assert_eq(read_a->static_type, FILTERX_STATIC_TYPE_UNKNOWN);
+  filterx_expr_unref(block);
+}
+
+Test(filterx_type_inference, incremental_build_past_depth_cap_is_safe)
+{
+  /* Build a chain one level past the depth cap. The within-cap levels still resolve to DICT;
+   * the write past the cap is a safe no-op (no crash, no false propagation). */
+  FilterXExpr *assign_meta = filterx_assign_new(
+                              filterx_floating_variable_expr_new("meta"),
+                              filterx_literal_dict_new(NULL));
+  FilterXExpr *set_a = filterx_setattr_new(
+                        filterx_floating_variable_expr_new("meta"),
+                        filterx_string_new("a", -1),
+                        filterx_literal_dict_new(NULL));
+  FilterXExpr *set_ab = filterx_setattr_new(
+                         filterx_getattr_new(filterx_floating_variable_expr_new("meta"),
+                                             filterx_string_new("a", -1)),
+                         filterx_string_new("b", -1),
+                         filterx_literal_dict_new(NULL));
+  FilterXExpr *set_abc = filterx_setattr_new(
+                          filterx_getattr_new(
+                            filterx_getattr_new(filterx_floating_variable_expr_new("meta"),
+                                                filterx_string_new("a", -1)),
+                            filterx_string_new("b", -1)),
+                          filterx_string_new("c", -1),
+                          filterx_literal_dict_new(NULL));
+  /* This write lands past the depth cap: it must be a safe no-op. */
+  FilterXExpr *set_abcd = filterx_setattr_new(
+                           filterx_getattr_new(
+                             filterx_getattr_new(
+                               filterx_getattr_new(filterx_floating_variable_expr_new("meta"),
+                                                   filterx_string_new("a", -1)),
+                               filterx_string_new("b", -1)),
+                             filterx_string_new("c", -1)),
+                           filterx_string_new("d", -1),
+                           filterx_literal_dict_new(NULL));
+
+  FilterXExpr *read_abc = filterx_getattr_new(
+                           filterx_getattr_new(
+                             filterx_getattr_new(filterx_floating_variable_expr_new("meta"),
+                                                 filterx_string_new("a", -1)),
+                             filterx_string_new("b", -1)),
+                           filterx_string_new("c", -1));
+
+  FilterXExpr *block = filterx_compound_expr_new_va(TRUE, assign_meta, set_a, set_ab, set_abc,
+                                                    set_abcd, read_abc, NULL);
+  block = _run(block);
+
+  /* meta.a.b.c is the level-3 element (within the depth-4 cap), so it still resolves. */
+  cr_assert_eq(filterx_static_type_kind(read_abc->static_type), FILTERX_STATIC_TYPE_DICT);
   filterx_expr_unref(block);
 }
 

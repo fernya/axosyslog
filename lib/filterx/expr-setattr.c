@@ -150,15 +150,11 @@ _setattr_infer_types(FilterXExpr *s, FilterXTypeEnv *env)
   filterx_expr_infer_types_default(s, env);
   FilterXSetAttr *self = (FilterXSetAttr *) s;
 
-  /* Mutating contents invalidates element-type info. See _set_subscript_infer_types. */
-  FilterXVariableHandle handle;
-  if (filterx_variable_expr_get_handle(self->object, &handle))
-    {
-      FilterXStaticTypeSpec prior = filterx_type_env_get(env, handle);
-      FilterXStaticType kind = filterx_static_type_kind(prior);
-      if (kind != FILTERX_STATIC_TYPE_UNKNOWN)
-        filterx_type_env_set(env, handle, filterx_static_type_kind_only(kind));
-    }
+  /* Refine the written container's element type with the assigned value (lift if the level
+   * was a freshly-built empty container, meet otherwise). This keeps element-type info alive
+   * across incremental builds (meta.a = {}; meta.a.b = {}; ...) so deeper accesses devirtualize. */
+  filterx_type_env_update_on_write(env, self->object,
+                                   self->new_value ? self->new_value->static_type : 0);
 }
 
 static gboolean
