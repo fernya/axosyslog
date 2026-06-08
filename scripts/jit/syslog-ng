@@ -1,0 +1,23 @@
+#!/bin/bash
+# Wrapper for running syslog-ng from an arbitrary build directory.
+# Set SYSLOG_NG_PREFIX to the root of a syslog-ng build tree
+# (i.e. the directory that contains syslog-ng/.libs/syslog-ng).
+
+if test -z "$SYSLOG_NG_PREFIX"; then
+    echo "$0: error: SYSLOG_NG_PREFIX is not set" >&2
+    exit 1
+fi
+
+program='syslog-ng'
+progdir="$SYSLOG_NG_PREFIX/syslog-ng/.libs"
+
+if test ! -f "$progdir/$program"; then
+    echo "$0: error: '$progdir/$program' does not exist" >&2
+    exit 1
+fi
+
+LD_LIBRARY_PATH="$SYSLOG_NG_PREFIX/lib/.libs:$SYSLOG_NG_PREFIX/lib/secret-storage/.libs:$LD_LIBRARY_PATH"
+LD_LIBRARY_PATH=$(echo "$LD_LIBRARY_PATH" | sed 's/::*$//')
+export LD_LIBRARY_PATH
+
+exec "$progdir/$program" "$@"

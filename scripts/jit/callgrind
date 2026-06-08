@@ -1,0 +1,67 @@
+#!/bin/bash
+# Callgrind wrapper for syslog-ng.
+# Set SYSLOG_NG_PREFIX to the root of a syslog-ng build tree.
+
+SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+
+prof="${1:-}"
+config="${2:-$SCRIPT_DIR/callgrind-syslog-ng.conf}"
+samples="${3:-$SCRIPT_DIR/callgrind-samples.log}"
+
+if test -z "$SYSLOG_NG_PREFIX"; then
+    echo "$0: error: SYSLOG_NG_PREFIX is not set" >&2
+    exit 1
+fi
+
+program='syslog-ng'
+progdir="$SYSLOG_NG_PREFIX/syslog-ng/.libs"
+
+if test ! -f "$progdir/$program"; then
+    echo "$0: error: '$progdir/$program' does not exist" >&2
+    exit 1
+fi
+
+LD_LIBRARY_PATH="$SYSLOG_NG_PREFIX/lib/.libs:$SYSLOG_NG_PREFIX/lib/secret-storage/.libs:$LD_LIBRARY_PATH"
+LD_LIBRARY_PATH=$(echo "$LD_LIBRARY_PATH" | sed 's/::*$//')
+export LD_LIBRARY_PATH
+
+outbase="$SYSLOG_NG_PREFIX/callgrind"
+mkdir -p "$outbase"
+if [ "$prof" = "" ]; then
+    outdir=$(mktemp -d -p "$outbase" "report-$(date +%H%M%S).XXXX")
+else
+    outdir="$outbase/$prof"
+    mkdir -p "$outdir"
+fi
+
+source_dir=$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)
+if [ -n "$source_dir" ]; then
+    (cd "$source_dir" && git log -1) >> "$outdir/git-commit"
+fi
+
+# Cache layout: Intel(R) Xeon(R) Platinum 8275CL CPU @ 3.00GHz
+# L3 rounded to 32MB, used as LL to model miss-to-memory behaviour.
+valgrind --tool=callgrind --dump-instr=yes --collect-jumps=yes \
+    --I1=32768,8,64 --D1=32768,8,64 --LL=33554432,8,64 --cache-sim=yes \
+    --instr-atstart=no \
+    --callgrind-out-file="${outdir}/callgrind.out.%p" \
+    "$progdir/$program" -Fef "$config" 2>"$outdir/summary.txt" &
+
+i=0
+while ! grep -q "Accepting connections" "$outdir/summary.txt" 2>/dev/null; do
+    sleep 0.5
+    i=$((i+1))
+    if [ $i -gt 20 ]; then
+        echo "Timeout waiting for startup, waiting for process to exit"
+        wait %1
+        cat "$outdir/summary.txt"
+        exit 1
+    fi
+done
+
+cat "$samples" | nc -q0 localhost 2000
+kill -INT %1
+wait %1
+cat "$outdir/summary.txt"
+callgrind_annotate --tree=both --threshold=80 "${outdir}"/callgrind.out.* > "${outdir}/callgrind_annotate.txt"
+echo -e "\n\nTo see profile details do:\nless ${outdir}/callgrind_annotate.txt"
