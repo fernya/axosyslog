@@ -85,10 +85,9 @@ _mark_function_inline(LLVMContextRef ctx, LLVMValueRef fn)
     return;
 
   const gchar *name = LLVMGetValueName(fn);
-  if (_should_always_inline(name))
-    _add_function_attribute(ctx, fn, "alwaysinline");
-  else
-    _add_function_attribute(ctx, fn, "inlinehint");
+  gboolean aggressive = g_strcmp0(g_getenv("SYSLOG_NG_AGGRESSIVE_INLINE"), "1") == 0
+                        && _should_always_inline(name);
+  _add_function_attribute(ctx, fn, aggressive ? "alwaysinline" : "inlinehint");
 }
 
 static void
