@@ -247,6 +247,22 @@ FX_JIT_DO_NULLV_SET_SUBSCRIPT(list)
 
 #undef FX_JIT_DO_NULLV_SET_SUBSCRIPT
 
+#define FX_JIT_SET_SUBSCRIPT_STMT(name) \
+  __attribute__((used)) __attribute__((noinline)) \
+  gint32 \
+  name ## _stmt(FilterXObject *object, FilterXObject *key, FilterXObject *new_value, \
+                FilterXExpr *expr, FilterXEvalContext *context, FilterXObject **last_result) \
+  { \
+    return fx_jit_process_expr_result(name(object, key, new_value, expr), expr, context, last_result); \
+  }
+
+FX_JIT_SET_SUBSCRIPT_STMT(fx_jit_do_set_subscript_dict)
+FX_JIT_SET_SUBSCRIPT_STMT(fx_jit_do_set_subscript_list)
+FX_JIT_SET_SUBSCRIPT_STMT(fx_jit_do_nullv_set_subscript_dict)
+FX_JIT_SET_SUBSCRIPT_STMT(fx_jit_do_nullv_set_subscript_list)
+
+#undef FX_JIT_SET_SUBSCRIPT_STMT
+
 static FilterXIRValue
 _compile_dispatch(FilterXExpr *s, FilterXJIT *jit, const gchar *fn_dict, const gchar *fn_list)
 {

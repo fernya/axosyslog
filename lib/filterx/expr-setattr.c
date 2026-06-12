@@ -254,6 +254,22 @@ fx_jit_do_nullv_setattr_dict(FilterXExpr *s, FilterXObject *lhs, FilterXObject *
   return fx_jit_do_setattr_dict(s, lhs, cloned);
 }
 
+#define FX_JIT_SETATTR_STMT(name) \
+  __attribute__((used)) __attribute__((noinline)) \
+  gint32 \
+  name ## _stmt(FilterXExpr *s, FilterXObject *lhs, FilterXObject *cloned, \
+                FilterXEvalContext *context, FilterXObject **last_result) \
+  { \
+    return fx_jit_process_expr_result(name(s, lhs, cloned), s, context, last_result); \
+  }
+
+FX_JIT_SETATTR_STMT(fx_jit_do_setattr)
+FX_JIT_SETATTR_STMT(fx_jit_do_nullv_setattr)
+FX_JIT_SETATTR_STMT(fx_jit_do_setattr_dict)
+FX_JIT_SETATTR_STMT(fx_jit_do_nullv_setattr_dict)
+
+#undef FX_JIT_SETATTR_STMT
+
 static inline FilterXIRValue
 _emit_setattr_call(FilterXSetAttr *self, FilterXJIT *jit, const gchar *fn_name)
 {
