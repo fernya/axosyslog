@@ -85,6 +85,7 @@ _should_always_inline(const gchar *name)
     "fx_jit_do_nullv_setattr_dict",
     "filterx_string_concat",
     "fx_jit_do_plus_string",
+    "fx_jit_do_plus_int",
   };
 
   for (gsize i = 0; i < G_N_ELEMENTS(allowlist); i++)
