@@ -223,7 +223,7 @@ _getattr_compile(FilterXExpr *s, FilterXJIT *jit)
   FilterXGetAttr *self = (FilterXGetAttr *) s;
   FilterXJITFFI *ffi = filterx_jit_get_ffi(jit);
 
-  const gchar *fn_name = self->operand->static_type == FILTERX_STATIC_TYPE_DICT
+  const gchar *fn_name = filterx_static_type_kind(self->operand->static_type) == FILTERX_STATIC_TYPE_DICT
                          ? "fx_jit_do_getattr_dict"
                          : "fx_jit_do_getattr";
 

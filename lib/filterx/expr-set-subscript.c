@@ -161,20 +161,6 @@ _free(FilterXExpr *s)
   filterx_expr_free_method(s);
 }
 
-static void
-_set_subscript_infer_types(FilterXExpr *s, FilterXTypeEnv *env)
-{
-  filterx_expr_infer_types_default(s, env);
-  FilterXSetSubscript *self = (FilterXSetSubscript *) s;
-
-  /* Refine the written container's element type with the assigned value (lift if the level
-   * was a freshly-built empty container, meet otherwise). This keeps element-type info alive
-   * across incremental builds (l = []; l[0] = {}; l[0].x = {}; ...) so deeper accesses
-   * devirtualize. */
-  filterx_type_env_update_on_write(env, self->object,
-                                   self->new_value ? self->new_value->static_type : INITIAL_FILTERX_STATIC_TYPE_SPEC);
-}
-
 #if SYSLOG_NG_ENABLE_JIT
 
 #include "filterx/jit/jit.h"
@@ -310,6 +296,20 @@ _nullv_set_subscript_compile(FilterXExpr *s, FilterXJIT *jit)
 }
 
 #endif
+
+static void
+_set_subscript_infer_types(FilterXExpr *s, FilterXTypeEnv *env)
+{
+  filterx_expr_infer_types_default(s, env);
+  FilterXSetSubscript *self = (FilterXSetSubscript *) s;
+
+  /* Refine the written container's element type with the assigned value (lift if the level
+   * was a freshly-built empty container, meet otherwise). This keeps element-type info alive
+   * across incremental builds (l = []; l[0] = {}; l[0].x = {}; ...) so deeper accesses
+   * devirtualize. */
+  filterx_type_env_update_on_write(env, self->object,
+                                   self->new_value ? self->new_value->static_type : INITIAL_FILTERX_STATIC_TYPE_SPEC);
+}
 
 static gboolean
 _set_subscript_walk(FilterXExpr *s, FilterXExprWalkFunc f, gpointer user_data)

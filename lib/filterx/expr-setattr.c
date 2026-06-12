@@ -277,7 +277,7 @@ static FilterXIRValue
 _setattr_compile(FilterXExpr *s, FilterXJIT *jit)
 {
   FilterXSetAttr *self = (FilterXSetAttr *) s;
-  const gchar *fn_name = self->object->static_type == FILTERX_STATIC_TYPE_DICT
+  const gchar *fn_name = filterx_static_type_kind(self->object->static_type) == FILTERX_STATIC_TYPE_DICT
                          ? "fx_jit_do_setattr_dict"
                          : "fx_jit_do_setattr";
   return _emit_setattr_call(self, jit, fn_name);
@@ -287,7 +287,7 @@ static FilterXIRValue
 _nullv_setattr_compile(FilterXExpr *s, FilterXJIT *jit)
 {
   FilterXSetAttr *self = (FilterXSetAttr *) s;
-  const gchar *fn_name = self->object->static_type == FILTERX_STATIC_TYPE_DICT
+  const gchar *fn_name = filterx_static_type_kind(self->object->static_type) == FILTERX_STATIC_TYPE_DICT
                          ? "fx_jit_do_nullv_setattr_dict"
                          : "fx_jit_do_nullv_setattr";
   return _emit_setattr_call(self, jit, fn_name);
