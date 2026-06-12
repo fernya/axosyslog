@@ -223,6 +223,20 @@ FX_JIT_DO_GET_SUBSCRIPT(dict_string_key, filterx_dict_get_subscript_unchecked)
 
 #undef FX_JIT_DO_GET_SUBSCRIPT
 
+#define FX_JIT_DO_GET_SUBSCRIPT_TYPED(suffix) \
+  __attribute__((used)) __attribute__((noinline)) \
+  FilterXObject * \
+  fx_jit_do_get_subscript_ ## suffix ## _typed(FilterXObject *variable, FilterXObject *key, FilterXExpr *expr) \
+  { \
+    return filterx_expr_make_typed_object(expr, fx_jit_do_get_subscript_ ## suffix(variable, key, expr)); \
+  }
+
+FX_JIT_DO_GET_SUBSCRIPT_TYPED(dict)
+FX_JIT_DO_GET_SUBSCRIPT_TYPED(list)
+FX_JIT_DO_GET_SUBSCRIPT_TYPED(dict_string_key)
+
+#undef FX_JIT_DO_GET_SUBSCRIPT_TYPED
+
 static FilterXIRValue
 _get_subscript_compile(FilterXExpr *s, FilterXJIT *jit)
 {
