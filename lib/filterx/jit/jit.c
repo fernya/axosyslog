@@ -45,6 +45,11 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/mman.h>
+#include <sys/prctl.h>
+
+#ifndef PR_SET_THP_DISABLE
+#define PR_SET_THP_DISABLE 41
+#endif
 
 #define DEBUG_VERSION_KEY "Debug Info Version"
 #define DWARF_VERSION_KEY "Dwarf Version"
@@ -519,10 +524,160 @@ _setup_optimizations(FilterXJIT *self)
   LLVMOrcIRTransformLayerSetTransform(transform, _optimize_transform, self);
 }
 
+/*
+ * Experimental hugepage-backed memory manager for the JIT code sections
+ * (SYSLOG_NG_FILTERX_JIT_HUGEPAGES=1).  Code is bump-allocated from a single
+ * 2MB-aligned anonymous mapping marked MADV_HUGEPAGE, so the kernel can map
+ * it with huge PMDs: the whole JIT module then needs one iTLB entry instead
+ * of one per 4K page on every refetch.  Data sections get plain mappings.
+ * Reservations are virtual address space only; untouched pages cost nothing.
+ */
+
+#define FX_JIT_HUGEPAGE_SIZE (2UL * 1024 * 1024)
+#define FX_JIT_POOL_RESERVE (16UL * 1024 * 1024)
+
+typedef struct _FxJitHugepageMM
+{
+  guint8 *code_base;
+  gsize code_used;
+  guint8 *rodata_base;
+  gsize rodata_used;
+  guint8 *rwdata_base;
+  gsize rwdata_used;
+} FxJitHugepageMM;
+
+static gboolean
+_hugepage_jit_code_enabled(void)
+{
+  return g_strcmp0(g_getenv("SYSLOG_NG_FILTERX_JIT_HUGEPAGES"), "1") == 0;
+}
+
+static guint8 *
+_reserve_pool(gsize size, gboolean hugepages)
+{
+  gsize map_size = size + (hugepages ? FX_JIT_HUGEPAGE_SIZE : 0);
+  guint8 *base = mmap(NULL, map_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (base == MAP_FAILED)
+    return NULL;
+
+  if (hugepages)
+    {
+      /* trim to a 2MB-aligned base so THP can use huge PMDs */
+      guint8 *aligned = (guint8 *) (((guintptr) base + FX_JIT_HUGEPAGE_SIZE - 1) & ~(guintptr) (FX_JIT_HUGEPAGE_SIZE -
+                                    1));
+      gsize head = aligned - base;
+      gsize tail = FX_JIT_HUGEPAGE_SIZE - head;
+      if (head)
+        munmap(base, head);
+      if (tail)
+        munmap(aligned + size, tail);
+      base = aligned;
+      madvise(base, size, MADV_HUGEPAGE);
+    }
+  return base;
+}
+
+static guint8 *
+_pool_alloc(guint8 **base, gsize *used, gsize size, gsize alignment, gboolean hugepages)
+{
+  if (!*base)
+    {
+      *base = _reserve_pool(FX_JIT_POOL_RESERVE, hugepages);
+      if (!*base)
+        return NULL;
+    }
+
+  if (alignment < 16)
+    alignment = 16;
+  gsize offs = (*used + alignment - 1) & ~(alignment - 1);
+  if (offs + size > FX_JIT_POOL_RESERVE)
+    return NULL;
+  *used = offs + size;
+  return *base + offs;
+}
+
+static void *
+_hugepage_mm_create_context(void *ctx_ctx)
+{
+  return g_new0(FxJitHugepageMM, 1);
+}
+
+static void
+_hugepage_mm_notify_terminating(void *ctx_ctx)
+{
+}
+
+static uint8_t *
+_hugepage_mm_allocate_code(void *opaque, uintptr_t size, unsigned alignment, unsigned section_id,
+                           const char *section_name)
+{
+  FxJitHugepageMM *mm = (FxJitHugepageMM *) opaque;
+  return _pool_alloc(&mm->code_base, &mm->code_used, size, alignment, TRUE);
+}
+
+static uint8_t *
+_hugepage_mm_allocate_data(void *opaque, uintptr_t size, unsigned alignment, unsigned section_id,
+                           const char *section_name, LLVMBool is_read_only)
+{
+  FxJitHugepageMM *mm = (FxJitHugepageMM *) opaque;
+  if (is_read_only)
+    return _pool_alloc(&mm->rodata_base, &mm->rodata_used, size, alignment, FALSE);
+  return _pool_alloc(&mm->rwdata_base, &mm->rwdata_used, size, alignment, FALSE);
+}
+
+static LLVMBool
+_hugepage_mm_finalize(void *opaque, char **err_msg)
+{
+  FxJitHugepageMM *mm = (FxJitHugepageMM *) opaque;
+
+  /* protecting the whole reservation keeps the VMA (and its huge PMDs) in one piece */
+  if (mm->code_base && mprotect(mm->code_base, FX_JIT_POOL_RESERVE, PROT_READ | PROT_EXEC) != 0)
+    {
+      if (err_msg)
+        *err_msg = strdup("FilterX JIT hugepage MM: mprotect(code, rx) failed");
+      return 1;
+    }
+  if (mm->rodata_base && mprotect(mm->rodata_base, FX_JIT_POOL_RESERVE, PROT_READ) != 0)
+    {
+      if (err_msg)
+        *err_msg = strdup("FilterX JIT hugepage MM: mprotect(rodata, r) failed");
+      return 1;
+    }
+  return 0;
+}
+
+static void
+_hugepage_mm_destroy(void *opaque)
+{
+  FxJitHugepageMM *mm = (FxJitHugepageMM *) opaque;
+  if (mm->code_base)
+    munmap(mm->code_base, FX_JIT_POOL_RESERVE);
+  if (mm->rodata_base)
+    munmap(mm->rodata_base, FX_JIT_POOL_RESERVE);
+  if (mm->rwdata_base)
+    munmap(mm->rwdata_base, FX_JIT_POOL_RESERVE);
+  g_free(mm);
+}
+
 static LLVMOrcObjectLayerRef
 _create_object_layer_with_gdb_listener(void *ctx, LLVMOrcExecutionSessionRef es, const char *triple)
 {
-  LLVMOrcObjectLayerRef object_layer = LLVMOrcCreateRTDyldObjectLinkingLayerWithSectionMemoryManager(es);
+  LLVMOrcObjectLayerRef object_layer;
+
+  if (_hugepage_jit_code_enabled())
+    {
+      /* the user explicitly asked for hugepages: clear a THP-disable flag
+       * possibly inherited from the service manager, it overrides MADV_HUGEPAGE */
+      prctl(PR_SET_THP_DISABLE, 0, 0, 0, 0);
+      object_layer = LLVMOrcCreateRTDyldObjectLinkingLayerWithMCJITMemoryManagerLikeCallbacks(
+                       es, NULL,
+                       _hugepage_mm_create_context, _hugepage_mm_notify_terminating,
+                       _hugepage_mm_allocate_code, _hugepage_mm_allocate_data,
+                       _hugepage_mm_finalize, _hugepage_mm_destroy);
+    }
+  else
+    object_layer = LLVMOrcCreateRTDyldObjectLinkingLayerWithSectionMemoryManager(es);
+
   LLVMOrcRTDyldObjectLinkingLayerRegisterJITEventListener(object_layer, LLVMCreateGDBRegistrationListener());
   return object_layer;
 }
