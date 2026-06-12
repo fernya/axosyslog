@@ -15,7 +15,7 @@ REMOTE_SNG=/home/axoflow/jit-tests/syslog-ng
 LOGGEN_HOST=axoflow@10.192.25.208
 LOGGEN_KEY=/home/bferencz/Development/fernya-jit-tests/id_rsa.loggen
 LOCAL_PERF_CONF=/home/bferencz/Development/fernya-jit-tests/perf.conf
-REMOTE_PERF_CONF=/home/axoflow/jit-tests/perf_split.conf
+REMOTE_PERF_CONF=/home/axoflow/jit-tests/perf.conf
 BASELINE_COMMIT=56265ebd44215a370bbcb5f3602885c91c6fab42
 
 usage() {
@@ -102,7 +102,7 @@ run_once() {
 
   # Start syslog-ng on the remote host in the background; capture its PID
   local sng_pid
-  sng_pid=$(sng_ssh "nohup env SYSLOG_NG_PREFIX='$rprefix' SYSLOG_NG_FILTERX_JIT_CODEGEN='${SYSLOG_NG_FILTERX_JIT_CODEGEN}' SYSLOG_NG_FILTERX_JIT_LLVM_ARGS='${SYSLOG_NG_FILTERX_JIT_LLVM_ARGS}' ${extra_env:+$extra_env }'$REMOTE_SNG' --module-path '$rprefix/modules' -R '$rprefix/syslog-ng.persist' --pidfile '$rprefix/syslog-ng.pid' -c '$rprefix/syslog-ng.ctl' -Fe -f '$REMOTE_PERF_CONF' >'$remote_tmplog' 2>&1 & echo \$!")
+  sng_pid=$(sng_ssh "nohup env SYSLOG_NG_PREFIX='$rprefix' SYSLOG_NG_FILTERX_JIT_CODEGEN='${SYSLOG_NG_FILTERX_JIT_CODEGEN}' SYSLOG_NG_FILTERX_JIT_LLVM_ARGS='${SYSLOG_NG_FILTERX_JIT_LLVM_ARGS}' SYSLOG_NG_FILTERX_JIT_PRESERVE_MOST='${SYSLOG_NG_FILTERX_JIT_PRESERVE_MOST}' SYSLOG_NG_FILTERX_JIT_HUGEPAGES='${SYSLOG_NG_FILTERX_JIT_HUGEPAGES}' ${extra_env:+$extra_env }'$REMOTE_SNG' --module-path '$rprefix/modules' -R '$rprefix/syslog-ng.persist' --pidfile '$rprefix/syslog-ng.pid' -c '$rprefix/syslog-ng.ctl' -Fe -f '$REMOTE_PERF_CONF' >'$remote_tmplog' 2>&1 & echo \$!")
 
   # Wait until syslog-ng prints "starting up" (JIT done) or timeout 120s
   local ready=0
@@ -149,6 +149,13 @@ deploy
 echo ">>> TIP ($(git -C "$REPO" rev-parse --short HEAD))"
 run_once "tip run 1"
 run_once "tip run 2"
+
+
+echo ">>> TIP tuned ($(git -C "$REPO" rev-parse --short HEAD))"
+run_once "tip run 3" 'SYSLOG_NG_FILTERX_JIT_HUGEPAGES=1'
+run_once "tip run 4" 'SYSLOG_NG_FILTERX_JIT_HUGEPAGES=1'
+
+exit 0
 
 # Checkout baseline commit and rebuild
 CURRENT_BRANCH=$(git -C "$REPO" rev-parse --abbrev-ref HEAD)

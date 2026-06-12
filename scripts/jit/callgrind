@@ -6,7 +6,6 @@ SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 
 prof="${1:-}"
 config="${2:-$SCRIPT_DIR/callgrind-syslog-ng.conf}"
-samples="${3:-$SCRIPT_DIR/callgrind-samples.log}"
 
 if test -z "$SYSLOG_NG_PREFIX"; then
     echo "$0: error: SYSLOG_NG_PREFIX is not set" >&2
@@ -41,25 +40,64 @@ fi
 
 # Cache layout: Intel(R) Xeon(R) Platinum 8275CL CPU @ 3.00GHz
 # L3 rounded to 32MB, used as LL to model miss-to-memory behaviour.
+MSGS=100
+ctl_sock="$outdir/syslog-ng.ctl"
+rm -f "$ctl_sock"
+
 valgrind --tool=callgrind --dump-instr=yes --collect-jumps=yes \
     --I1=32768,8,64 --D1=32768,8,64 --LL=33554432,8,64 --cache-sim=yes \
     --instr-atstart=no \
     --callgrind-out-file="${outdir}/callgrind.out.%p" \
-    "$progdir/$program" -Fef "$config" 2>"$outdir/summary.txt" &
+    "$progdir/$program" -Fef "$config" -c "$ctl_sock" 2>"$outdir/summary.txt" &
 
+vgpid=$!
+
+# Wait for "starting up" (config init incl. JIT compilation done).  Generous
+# timeout: even the uninstrumented startup phase is ~5x slower under valgrind.
 i=0
-while ! grep -q "Accepting connections" "$outdir/summary.txt" 2>/dev/null; do
+while ! grep -q "starting up" "$outdir/summary.txt" 2>/dev/null; do
     sleep 0.5
     i=$((i+1))
-    if [ $i -gt 20 ]; then
+    if [ $i -gt 600 ]; then
         echo "Timeout waiting for startup, waiting for process to exit"
+        kill "$vgpid" 2>/dev/null
         wait %1
+        cat "$outdir/summary.txt"
+        exit 1
+    fi
+    if ! kill -0 "$vgpid" 2>/dev/null; then
+        echo "syslog-ng died during startup:"
         cat "$outdir/summary.txt"
         exit 1
     fi
 done
 
-cat "$samples" | nc -q0 localhost 2000
+# Instrument only the message-processing phase, not startup/JIT compilation
+callgrind_control --instr=on "$vgpid" >/dev/null
+
+loggen="$SYSLOG_NG_PREFIX/tests/loggen/loggen"
+"$loggen" -iS --perf --active-connections 1 -n "$MSGS" 127.0.0.1 2000
+
+# No destination is configured, so wait until all messages were processed:
+# poll the source "processed" counter via the control socket (utime cannot be
+# used, syslog-ng spins at 100% CPU under callgrind even when idle).
+sng_ctl="$SYSLOG_NG_PREFIX/syslog-ng-ctl/syslog-ng-ctl"
+i=0
+while true; do
+    processed=$("$sng_ctl" stats -c "$ctl_sock" 2>/dev/null | \
+                awk -F';' '$1 ~ /^src\./ && $1 != "src.internal" && $5=="processed" {s+=$6} END{print s+0}')
+    [ "$processed" -ge "$MSGS" ] && break
+    i=$((i+1))
+    if [ $i -gt 240 ]; then
+        echo "Timeout waiting for $MSGS messages to be processed (got $processed)"
+        break
+    fi
+    sleep 0.5
+done
+
+# Stop counting before shutdown so the dump covers only message processing
+callgrind_control --instr=off "$vgpid" >/dev/null
+
 kill -INT %1
 wait %1
 cat "$outdir/summary.txt"
