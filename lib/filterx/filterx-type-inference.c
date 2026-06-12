@@ -176,6 +176,37 @@ filterx_type_env_meet_into(FilterXTypeEnv *dst, const FilterXTypeEnv *src)
 }
 
 void
+filterx_type_env_propagate_to_persistent(FilterXTypeEnv *persistent, const FilterXTypeEnv *block_env)
+{
+  /* Add or meet every entry from block_env into persistent.
+   * Entries absent from persistent are added (new knowledge); present entries are met. */
+  GHashTableIter iter;
+  gpointer k, v;
+
+  g_hash_table_iter_init(&iter, block_env->handle_to_spec);
+  while (g_hash_table_iter_next(&iter, &k, &v))
+    {
+      FilterXStaticTypeSpec new_spec = (FilterXStaticTypeSpec) GPOINTER_TO_UINT(v);
+      FilterXVariableHandle handle = (FilterXVariableHandle) GPOINTER_TO_UINT(k);
+      FilterXStaticTypeSpec old_spec = filterx_type_env_get(persistent, handle);
+      FilterXStaticTypeSpec merged = (old_spec == 0) ? new_spec : filterx_static_type_spec_meet(old_spec, new_spec);
+      filterx_type_env_set(persistent, handle, merged);
+    }
+
+  g_hash_table_iter_init(&iter, block_env->attr_to_spec);
+  while (g_hash_table_iter_next(&iter, &k, &v))
+    {
+      FilterXStaticTypeSpec new_spec = (FilterXStaticTypeSpec) GPOINTER_TO_UINT(v);
+      FilterXStaticTypeSpec old_spec = (FilterXStaticTypeSpec) GPOINTER_TO_UINT(
+                                         g_hash_table_lookup(persistent->attr_to_spec, k));
+      FilterXStaticTypeSpec merged = (old_spec == 0) ? new_spec : filterx_static_type_spec_meet(old_spec, new_spec);
+      if (merged != old_spec)
+        g_hash_table_insert(persistent->attr_to_spec, g_strdup((const gchar *) k),
+                            GUINT_TO_POINTER((guint) merged));
+    }
+}
+
+void
 filterx_expr_infer_types(FilterXExpr *self, FilterXTypeEnv *env)
 {
   if (!self)
@@ -194,6 +225,22 @@ filterx_expr_infer_types_root(FilterXExpr *root)
     return;
   FilterXTypeEnv *env = filterx_type_env_new();
   filterx_expr_infer_types(root, env);
+  filterx_type_env_free(env);
+}
+
+void
+filterx_expr_infer_types_root_persistent(FilterXExpr *root, FilterXTypeEnv *persistent_env)
+{
+  if (!root)
+    return;
+  if (!persistent_env)
+    {
+      filterx_expr_infer_types_root(root);
+      return;
+    }
+  FilterXTypeEnv *env = filterx_type_env_clone(persistent_env);
+  filterx_expr_infer_types(root, env);
+  filterx_type_env_propagate_to_persistent(persistent_env, env);
   filterx_type_env_free(env);
 }
 
