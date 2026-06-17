@@ -41,7 +41,8 @@ lib_filterx_tests_TESTS		 =              \
 		lib/filterx/tests/test_func_str_utf8 \
 		lib/filterx/tests/test_func_glob \
 		lib/filterx/tests/test_object_subnet \
-		lib/filterx/tests/test_object_ip
+		lib/filterx/tests/test_object_ip \
+		lib/filterx/tests/test_type_inference
 
 EXTRA_DIST += lib/filterx/tests/CMakeLists.txt
 
@@ -67,6 +68,9 @@ lib_filterx_tests_test_object_string_LDADD   = $(TEST_LDADD) $(JSON_LIBS)
 
 lib_filterx_tests_test_filterx_expr_CFLAGS  = $(TEST_CFLAGS)
 lib_filterx_tests_test_filterx_expr_LDADD   = $(TEST_LDADD) $(PREOPEN_SYSLOGFORMAT) $(JSON_LIBS)
+
+lib_filterx_tests_test_type_inference_CFLAGS  = $(TEST_CFLAGS)
+lib_filterx_tests_test_type_inference_LDADD   = $(TEST_LDADD) $(PREOPEN_SYSLOGFORMAT) $(JSON_LIBS)
 
 lib_filterx_tests_test_filterx_plist_CFLAGS  = $(TEST_CFLAGS)
 lib_filterx_tests_test_filterx_plist_LDADD   = $(TEST_LDADD) $(PREOPEN_SYSLOGFORMAT) $(JSON_LIBS)
