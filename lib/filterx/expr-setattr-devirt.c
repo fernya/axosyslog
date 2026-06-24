@@ -47,6 +47,12 @@ fx_jit_do_nullv_setattr(FilterXExpr *s, FilterXObject *lhs, FilterXObject *clone
 /* Same as _do_setattr but calls filterx_dict_set_subscript directly, without the
  * ref-setattr → mapping-setattr → set_subscript vtable chain.
  *
+ * The static type DICT is only a hint, and filterx_dict_set_subscript() is the
+ * implementation of dict alone: it downcasts to FilterXDictObject and skips the vtable. A
+ * sibling mapping (e.g. otel_logrecord.body keeps an assigned dict as an otel_kvlist) has a
+ * different instance struct, and a subtype of dict could override set_subscript. Guard on
+ * the exact runtime type, and fall back to the vtable setattr.
+ *
  * _emit_setattr_call() guards @cloned against NULL, only @lhs can still fail here. */
 __attribute__((used))
 FilterXObject *
@@ -60,6 +66,9 @@ fx_jit_typed_setattr_dict(FilterXExpr *s, FilterXObject *lhs, FilterXObject *clo
                                           "Failed to evaluate expression");
       goto error;
     }
+
+  if (!filterx_object_is_exact_type_or_ref(lhs, &FILTERX_TYPE_NAME(dict)))
+    return _do_setattr(self, lhs, cloned);
 
   if (!filterx_dict_set_subscript(lhs, self->attr, &cloned))
     {

@@ -40,8 +40,14 @@ fx_jit_do_getattr(FilterXExpr *s, FilterXObject *variable)
  * directly, without the mapping's getattr → get_subscript hop. self->attr is borrowed from
  * the FilterXGetAttr struct and must not be unrefed.
  *
+ * The static type DICT is only a hint, and filterx_dict_get_subscript() is the
+ * implementation of dict alone: it downcasts to FilterXDictObject and skips the vtable. A
+ * sibling mapping (e.g. otel_logrecord.body keeps an assigned dict as an otel_kvlist) has a
+ * different instance struct, and a subtype of dict could override get_subscript. Guard on
+ * the exact runtime type, and fall back to the vtable getattr.
+ *
  * filterx_dict_get_subscript unwraps @variable read-only, so a ref also needs an explicit
- * float of the shared child to keep copy-on-write. */
+ * float of the shared child to keep copy-on-write. The fallback floats via the ref vtable. */
 __attribute__((used))
 FilterXObject *
 fx_jit_typed_getattr_dict(FilterXExpr *s, FilterXObject *variable)
@@ -54,6 +60,9 @@ fx_jit_typed_getattr_dict(FilterXExpr *s, FilterXObject *variable)
                                           "Failed to evaluate expression");
       return NULL;
     }
+
+  if (!filterx_object_is_exact_type_or_ref(variable, &FILTERX_TYPE_NAME(dict)))
+    return _do_getattr(self, variable);
 
   FilterXObject *result = filterx_dict_get_subscript(variable, self->attr);
   if (!result)
