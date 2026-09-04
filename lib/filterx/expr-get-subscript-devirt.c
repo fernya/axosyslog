@@ -32,11 +32,12 @@
 
 typedef FilterXObject *(*FilterXJITTypedGetSubscript)(FilterXObject *object, FilterXObject *key);
 
-/* The static type that selected this fast path is only a hint, and @typed_get_subscript is
- * the implementation of one exact type: it downcasts the instance struct and skips the
- * vtable. A sibling container (e.g. otel_kvlist, which the inference marks DICT once a dict
- * lands in it) has a different instance struct, and a subtype of dict/list could override
- * get_subscript. @expected_type therefore guards on the exact runtime type.
+/* The static type that selected a fast path is only a hint, and @typed_get_subscript is the
+ * implementation of one exact type: it downcasts the instance struct and skips the vtable.
+ * A sibling container (e.g. otel_kvlist, which the inference marks DICT once a dict lands in
+ * it) has a different instance struct, and a subtype of dict/list could override
+ * get_subscript. @expected_type therefore guards on the exact runtime type. It is NULL in
+ * the generic helper, which has no fast path and always takes the vtable.
  *
  * _get_subscript_compile() guards @variable against NULL, only @key can still fail here.
  *
@@ -55,7 +56,7 @@ _do_get_subscript(FilterXObject *variable, FilterXObject *key,
     }
 
   FilterXObject *result;
-  if (filterx_object_is_exact_type_or_ref(variable, expected_type))
+  if (expected_type && filterx_object_is_exact_type_or_ref(variable, expected_type))
     {
       result = typed_get_subscript(variable, key);
       if (result && filterx_object_is_ref(variable))
@@ -69,6 +70,15 @@ _do_get_subscript(FilterXObject *variable, FilterXObject *key,
   filterx_object_unref(key);
   filterx_object_unref(variable);
   return result;
+}
+
+/* No usable static type hint: the vtable does the dispatch, but the operand and the key
+ * expressions stay compiled instead of falling back to the interpreter. */
+__attribute__((used))
+FilterXObject *
+fx_jit_do_get_subscript(FilterXObject *variable, FilterXObject *key)
+{
+  return _do_get_subscript(variable, key, NULL, NULL);
 }
 
 __attribute__((used))
@@ -103,7 +113,8 @@ _get_subscript_compile(FilterXExpr *s, FilterXJIT *jit)
       fn_name = "fx_jit_typed_get_subscript_list";
       break;
     default:
-      return fx_jit_emit_expr_eval(jit, s);
+      fn_name = "fx_jit_do_get_subscript";
+      break;
     }
 
   FilterXIRValue result_slot = filterx_jit_ir_add_stack_slot(jit, ffi->ptr_ty, "result");
