@@ -143,6 +143,12 @@ altp_option
           {
             last_altp_options->altp.tls_policy = $3 ? ALTP_TLS_POLICY_REQUIRED : ALTP_TLS_POLICY_NONE;
           }
+        /* optional is what an unset policy already is: STARTTLS when it is offered and tls() is
+         * there, plaintext otherwise, so it is AUTO and not the OPTIONAL policy, which needs tls() */
+        | KW_TLS_REQUIRED '(' KW_OPTIONAL ')'
+          {
+            last_altp_options->altp.tls_policy = ALTP_TLS_POLICY_AUTO;
+          }
         | KW_SERIALIZATION '(' yesno ')'
           {
             msg_notice("serialization() has no effect on an ALTP receiver, "
