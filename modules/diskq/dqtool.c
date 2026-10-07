@@ -536,6 +536,9 @@ _persist_foreach_relocate_selected_qfiles(gchar *name, gint size, gpointer entry
   gint argc_start = GPOINTER_TO_INT(args[3]);
   gchar *qfile = persist_state_lookup_string(state, name, NULL, NULL);
 
+  if (!qfile)
+    return;
+
   for (gint i = argc_start; i < argc; i++)
     {
       if (!strcmp(qfile, argv[i]))
