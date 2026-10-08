@@ -535,7 +535,9 @@ extern void register_builtin_modules(PluginContext *context) __attribute__((weak
 static void
 plugin_discover_builtin_modules(PluginContext *context)
 {
-  register_builtin_modules(context);
+  /* tools other than syslog-ng, like persist-tool, do not define it */
+  if (register_builtin_modules)
+    register_builtin_modules(context);
 }
 
 #else
