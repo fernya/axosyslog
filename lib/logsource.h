@@ -55,6 +55,8 @@ typedef struct _LogSourceOptions
 
 typedef struct _LogSource LogSource;
 
+#define LOG_SOURCE_CACHE_LINE_SIZE 64
+
 /**
  * LogSource:
  *
@@ -89,20 +91,30 @@ struct _LogSource
     StatsCounterItem *recvd_messages;
     StatsByteCounter recvd_bytes;
     StatsCounterItem *last_message_seen;
-    StatsCounterItem *window_available;
-    StatsCounterItem *window_capacity;
-    StatsCounterItem *window_full_total;
-    StatsAggregator *processing_latency;
 
-    /* book-keeping */
-    StatsClusterKeyBuilder *stats_kb;
-    StatsClusterKey *recvd_bytes_key;
-    StatsClusterKey *recvd_messages_key;
-    StatsClusterKey *window_available_key;
-    StatsClusterKey *window_capacity_key;
-    StatsClusterKey *window_full_total_key;
-    StatsClusterKey *processing_latency_key;
+    /* With 8-byte pointers, these fields span more than a cache line. With
+     * 4-byte pointers, the separator pads them to one, so the flow control
+     * state below does not share a cache line with window_available. */
+    union
+    {
+      struct
+      {
+        StatsCounterItem *window_available;
+        StatsCounterItem *window_capacity;
+        StatsCounterItem *window_full_total;
+        StatsAggregator *processing_latency;
 
+        /* book-keeping */
+        StatsClusterKeyBuilder *stats_kb;
+        StatsClusterKey *recvd_bytes_key;
+        StatsClusterKey *recvd_messages_key;
+        StatsClusterKey *window_available_key;
+        StatsClusterKey *window_capacity_key;
+        StatsClusterKey *window_full_total_key;
+        StatsClusterKey *processing_latency_key;
+      };
+      gchar flow_control_separator[LOG_SOURCE_CACHE_LINE_SIZE];
+    };
   } metrics;
 
   /* these are shared between the input/output threads and bouncing back and forth */
@@ -115,13 +127,11 @@ struct _LogSource
 };
 
 /* the hot flow control state should not share a cache line with the fields
- * read on every message. The fields in between are pointers, so the distance
- * is only there with 8-byte pointers. */
-#if GLIB_SIZEOF_VOID_P == 8
+ * read on every message */
 G_STATIC_ASSERT(G_STRUCT_OFFSET(LogSource, last_ack_count) - G_STRUCT_OFFSET(LogSource,
-                metrics.window_available) >= 64);
-G_STATIC_ASSERT(G_STRUCT_OFFSET(LogSource, last_ack_count) - G_STRUCT_OFFSET(LogSource, ack_tracker) >= 64);
-#endif
+                metrics.window_available) >= LOG_SOURCE_CACHE_LINE_SIZE);
+G_STATIC_ASSERT(G_STRUCT_OFFSET(LogSource, last_ack_count) - G_STRUCT_OFFSET(LogSource,
+                ack_tracker) >= LOG_SOURCE_CACHE_LINE_SIZE);
 
 static inline gboolean
 log_source_free_to_send(LogSource *self)
