@@ -115,10 +115,13 @@ struct _LogSource
 };
 
 /* the hot flow control state should not share a cache line with the fields
- * read on every message */
+ * read on every message. The fields in between are pointers, so the distance
+ * is only there with 8-byte pointers. */
+#if GLIB_SIZEOF_VOID_P == 8
 G_STATIC_ASSERT(G_STRUCT_OFFSET(LogSource, last_ack_count) - G_STRUCT_OFFSET(LogSource,
                 metrics.window_available) >= 64);
 G_STATIC_ASSERT(G_STRUCT_OFFSET(LogSource, last_ack_count) - G_STRUCT_OFFSET(LogSource, ack_tracker) >= 64);
+#endif
 
 static inline gboolean
 log_source_free_to_send(LogSource *self)
